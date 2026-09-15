@@ -153,8 +153,6 @@ Deployment: [Technology]
 
 🚧 **In Development**
 
-PakaiLagi saat ini berada dalam tahap pengembangan dengan fokus pada implementasi **MVP** dan core flow berbagi barang.
-
 ---
 
 **PakaiLagi — Berbagi hari ini, digunakan kembali esok.**
