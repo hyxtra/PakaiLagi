@@ -3,7 +3,6 @@
 > **Berbagi barang yang masih layak pakai, agar dapat digunakan kembali oleh mereka yang membutuhkan.**
 
 ## About
-
 **PakaiLagi** adalah platform berbagi barang secara gratis yang mempertemukan orang yang memiliki barang layak pakai dengan orang yang membutuhkannya.
 
 PakaiLagi dapat digunakan oleh:
