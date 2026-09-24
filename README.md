@@ -142,11 +142,10 @@ Fitur utama dalam MVP:
 ## Tech Stack
 
 ```text
-Frontend  : [Technology]
-Backend   : [Technology]
-Database  : [Technology]
-Deployment: [Technology]
-```
+Frontend  : React Native (Expo) & TypeScript
+Backend   : Supabase (Auth, Storage, RPC)
+Database  : PostgreSQL (Supabase)
+Deployment: EAS Build (APK) & Vercel (Web/PWA)
 
 ## Status
 
