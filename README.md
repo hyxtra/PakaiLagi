@@ -6,6 +6,7 @@
 **PakaiLagi** adalah platform berbagi barang secara gratis yang mempertemukan orang yang memiliki barang layak pakai dengan orang yang membutuhkannya.
 
 PakaiLagi dapat digunakan oleh:
+
 * Individu
 * Rumah tangga
 * Kantor
@@ -70,7 +71,7 @@ Pemilik dapat:
 ### Metode Pengambilan
 
 | Metode             | Penjelasan                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------- |
+| ------------------ | ------------------------------------------------------------------------------------ |
 | **Ambil Langsung** | Penerima mengambil barang di lokasi pemberi.                                        |
 | **Bertemu**        | Pemberi dan penerima menentukan lokasi pertemuan yang disepakati bersama.           |
 | **Kurir**          | Barang dikirim menggunakan layanan kurir dengan biaya logistik ditanggung penerima. |
@@ -97,9 +98,8 @@ Pemilik dapat:
 ## Status Barang
 
 | Status      | Deskripsi                                            |
-| ----------- | ---------------------------------------------------- |
+| ----------- | ----------------------------------------------------- |
 | `AVAILABLE` | Barang tersedia dan dapat diajukan untuk diambil.    |
-| `REQUESTED` | Terdapat pengajuan pengambilan terhadap barang.      |
 | `RESERVED`  | Barang telah disetujui dan disiapkan untuk penerima. |
 | `COMPLETED` | Proses serah terima barang telah selesai.            |
 
@@ -141,10 +141,14 @@ Fitur utama dalam MVP:
 ## Tech Stack
 
 ```text
-Frontend  : React Native (Expo) & TypeScript
-Backend   : Supabase (Auth, Storage, RPC)
-Database  : PostgreSQL (Supabase)
-Deployment: EAS Build (APK) & Vercel (Web/PWA)
+Frontend       : Flutter (Dart)
+State Mgmt     : Riverpod
+Routing        : go_router
+Backend & Auth : Supabase (PostgreSQL, Supabase Auth)
+Storage        : Supabase Storage
+Image Handling : image_picker + flutter_image_compress
+Deployment     : flutter build apk (Android), flutter build web + Vercel/Netlify (Web/PWA)
+```
 
 ## Status
 
