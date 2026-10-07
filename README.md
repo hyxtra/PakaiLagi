@@ -72,9 +72,9 @@ Pemilik dapat:
 
 | Metode             | Penjelasan                                                                          |
 | ------------------ | ----------------------------------------------------------------------------------- |
-| **Ambil Langsung** | Penerima mengambil barang di lokasi pemberi.                                        |
-| **Bertemu**        | Pemberi dan penerima menentukan lokasi pertemuan yang disepakati bersama.           |
-| **Kurir**          | Barang dikirim menggunakan layanan kurir dengan biaya logistik ditanggung penerima. |
+| **Ambil Sendiri** | Penerima mengambil barang di lokasi pemberi.                                        |
+| **Bertemu (COD)**        | Pemberi dan penerima menentukan lokasi pertemuan yang disepakati bersama.           |
+| **Antar ke Alamat**          | Barang dikirim menggunakan layanan kurir dengan biaya logistik ditanggung penerima. |
 
 ## Features
 
