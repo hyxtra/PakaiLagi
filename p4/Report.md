@@ -108,7 +108,7 @@ Ringkasan prompt yang digunakan untuk menginstruksikan AI:
 
 Beberapa penyesuaian yang saya periksa dan perbaiki sendiri terhadap kode hasil AI:
 
-* **Perbaikan Flaky Test:** Widget test awalnya menggunakan `Future.delayed` yang menyebabkan pending timer saat pengujian. Saya ganti dengan `_FakePostItemNotifier` yang langsung meng-set state secara synchronous tanpa memanggil repository asli, sehingga `flutter test` berjalan 100% tanpa flaky.
+* **Perbaikan Flaky Test:** Widget test awalnya menggunakan `Future.delayed` yang menyebabkan pending timer saat pengujian. Saya ganti dengan `_FakePostItemNotifier` yang langsung meng-set state secara synchronous tanpa memanggil repository asli, sehingga `flutter test` berjalan 100%.
 
 * **Pembersihan Lint:** Menghapus sintaks `const` redundan pada parameter durasi dan menghapus fungsi helper yang tidak terpakai agar hasil `flutter analyze` bersih tanpa warning.
 
