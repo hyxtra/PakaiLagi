@@ -122,8 +122,6 @@ Beberapa penyesuaian yang saya periksa dan perbaiki sendiri terhadap kode hasil 
 
 ## 4. Bukti Screenshot & Widget Test
 
-> **Catatan:** Ganti placeholder di bawah ini dengan screenshot asli dari perangkat/emulator.
-
 ### 4.1 Screenshot 6 Kondisi UI
 
 | Kondisi | Screenshot |
