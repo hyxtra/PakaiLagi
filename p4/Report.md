@@ -1,4 +1,4 @@
-# PROMPTS.md — Dokumentasi Tugas State Management (Flutter + Riverpod)
+﻿# PROMPTS.md — Dokumentasi Tugas State Management (Flutter + Riverpod)
 
 > **Proyek:** PakaiLagi — Aplikasi donasi barang bekas  
 > **Fitur yang diimplementasikan:** Post Item (Tambah Barang)  
@@ -108,7 +108,7 @@ Ringkasan prompt yang digunakan untuk menginstruksikan AI:
 
 Beberapa penyesuaian yang saya periksa dan perbaiki sendiri terhadap kode hasil AI:
 
-* **Perbaikan Flaky Test:** Widget test awalnya menggunakan `Future.delayed` yang menyebabkan pending timer saat pengujian. Saya ganti dengan `_FakePostItemNotifier` yang langsung meng-set state secara synchronous tanpa memanggil repository asli, sehingga `flutter test` berjalan 100% tanpa flaky.
+* **Perbaikan Flaky Test:** Widget test awalnya menggunakan `Future.delayed` yang menyebabkan pending timer saat pengujian. Saya ganti dengan `_FakePostItemNotifier` yang langsung meng-set state secara synchronous tanpa memanggil repository asli, sehingga `flutter test` berjalan 100%.
 
 * **Pembersihan Lint:** Menghapus sintaks `const` redundan pada parameter durasi dan menghapus fungsi helper yang tidak terpakai agar hasil `flutter analyze` bersih tanpa warning.
 
@@ -128,17 +128,17 @@ Beberapa penyesuaian yang saya periksa dan perbaiki sendiri terhadap kode hasil 
 
 | Kondisi | Screenshot |
 |---------|-----------|
-| 1. Initial Loading | ![Kondisi 1 - Loading](screenshots/kondisi_1_loading.png) |
-| 2. Data Loaded (Form) | ![Kondisi 2 - Form](screenshots/kondisi_2_form.png) |
-| 3. Empty State | ![Kondisi 3 - Empty](screenshots/kondisi_3_empty.png) |
-| 4. Error State + Retry | ![Kondisi 4 - Error](screenshots/kondisi_4_error.png) |
-| 5. Validasi Input | ![Kondisi 5 - Validasi](screenshots/kondisi_5_validasi.png) |
-| 6. Submit Loading | ![Kondisi 6 - Submit](screenshots/kondisi_6_submit.png) |
+| 1. Initial Loading | ![Kondisi 1 - Loading](dokumentasi/01_initial_loading.png) |
+| 2. Data Loaded (Form) | ![Kondisi 2 - Form](dokumentasi/02_data_loaded.png) |
+| 3. Empty State | ![Kondisi 3 - Empty](dokumentasi/03_empty_state.png) |
+| 4. Error State + Retry | ![Kondisi 4 - Error](dokumentasi/04_error_state.png) |
+| 5. Validasi Input | ![Kondisi 5 - Validasi](dokumentasi/05_form_validation.png) |
+| 6. Submit Loading | ![Kondisi 6 - Submit](dokumentasi/06_submit_loading.png) |
 
 ### 4.2 Hasil Widget Test (`flutter test`)
 
-![Hasil Flutter Test](screenshots/flutter_test_result.png)
+![Hasil Flutter Test](dokumentasi/flutter_test.png)
 
 ### 4.3 Hasil Analisis (`flutter analyze`)
 
-![Hasil Flutter Analyze](screenshots/flutter_analyze_result.png)
+![Hasil Flutter Analyze](dokumentasi/flutter_analyze.png)
