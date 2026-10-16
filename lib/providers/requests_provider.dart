@@ -1,12 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/mock_data.dart';
 import '../models/pickup_request.dart';
 import 'auth_provider.dart';
 
 /// Sumber tunggal daftar pengajuan pengambilan barang.
 class RequestsNotifier extends StateNotifier<List<PickupRequest>> {
-  RequestsNotifier() : super(List.of(seedRequests));
+  /// Data lokal dimulai kosong; pengajuan cloud disimpan di Firestore.
+  RequestsNotifier() : super(const []);
 
   void addRequest({
     required String itemId,
@@ -52,6 +52,7 @@ final myOutgoingRequestsProvider = Provider<List<PickupRequest>>((ref) {
   if (user == null) return const [];
   return ref
       .watch(requestsProvider)
-      .where((r) => r.requesterId == user.id && r.status == RequestStatus.pending)
+      .where(
+          (r) => r.requesterId == user.id && r.status == RequestStatus.pending)
       .toList();
 });

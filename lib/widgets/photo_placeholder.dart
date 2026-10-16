@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -23,6 +24,26 @@ class PhotoPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Item Firestore menyimpan foto sebagai Base64. Tangani sebelum URL/path
+    // agar string Base64 tidak diteruskan ke Image.network.
+    if (item.imageUrl != null && item.imageUrl!.startsWith('base64:')) {
+      try {
+        final bytes = base64Decode(item.imageUrl!.substring('base64:'.length));
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: SizedBox(
+            height: height,
+            width: double.infinity,
+            child: Image.memory(bytes,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _gradientFallback()),
+          ),
+        );
+      } on FormatException {
+        return _gradientFallback();
+      }
+    }
+
     // Jika ada local file path (dari image_picker)
     if (item.imageUrl != null && item.imageUrl!.startsWith('/')) {
       return ClipRRect(

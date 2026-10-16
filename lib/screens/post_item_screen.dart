@@ -8,6 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import '../notifiers/item_notifier.dart';
 import '../notifiers/item_state.dart';
 import '../providers/auth_provider.dart';
+import '../providers/cloud_item_provider.dart';
+import '../services/firebase_auth_service.dart';
 import '../theme/app_palette.dart';
 
 // =============================================================================
@@ -20,13 +22,14 @@ import '../theme/app_palette.dart';
 //   5. Validasi input form (pesan merah)
 //   6. Loading saat submit (tombol disabled + spinner)
 //
-// Fitur yang ada (sesuai repo asli):
+// Fitur yang ada:
 //   - Upload / preview foto (image_picker)
 //   - Toggle alamat: pakai alamat profil atau isi manual
 //   - Multi-select metode pengambilan
+//   - Tombol "Publish ke Cloud" → simpan langsung ke Firestore + Base64
 //
 // Widget ini HANYA bertanggung jawab menampilkan UI.
-// Semua logika bisnis ada di PostItemNotifier.
+// Semua logika bisnis ada di PostItemNotifier dan CloudItemNotifier.
 // =============================================================================
 
 /// Daftar metode pengambilan yang tersedia.
@@ -52,7 +55,8 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   String? _selectedCategory;
   final Set<String> _selectedMethods = {}; // multi-select
   bool _useProfileAddress = true; // toggle alamat
-  String? _pickedImagePath; // path foto yang dipilih
+  String? _pickedImagePath; // path foto untuk preview
+  XFile? _pickedXFile; // XFile asli untuk readAsBytes (kompatibel web)
 
   // ── KONDISI 5: Map error validasi per-field ──
   final Map<String, String> _validationErrors = {};
@@ -94,9 +98,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     );
     if (source == null) return;
     final picked =
-        await ImagePicker().pickImage(source: source, maxWidth: 1200);
+        await ImagePicker().pickImage(source: source, maxWidth: 600);
     if (picked != null) {
-      setState(() => _pickedImagePath = picked.path);
+      setState(() {
+        _pickedImagePath = picked.path;
+        _pickedXFile = picked;
+      });
     }
   }
 
@@ -134,7 +141,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // SUBMIT HANDLER
+  // SUBMIT HANDLER (Lokal — ke state mock)
   // ---------------------------------------------------------------------------
 
   Future<void> _handleSubmit() async {
@@ -159,18 +166,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
             );
 
     if (success && mounted) {
-      // Reset form setelah berhasil
-      _titleCtrl.clear();
-      _descCtrl.clear();
-      _otherAddrCtrl.clear();
-      setState(() {
-        _selectedCategory = null;
-        _selectedMethods.clear();
-        _useProfileAddress = true;
-        _pickedImagePath = null;
-        _validationErrors.clear();
-      });
-
+      _resetForm();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Barang berhasil diposting! 🎉'),
@@ -180,6 +176,104 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // PUBLISH KE CLOUD HANDLER — Firebase Firestore + Base64
+  // ---------------------------------------------------------------------------
+
+  /// Publish barang langsung ke Firestore.
+  /// Gambar di-encode menjadi Base64 string (tanpa Firebase Storage).
+  Future<void> _handlePublishToCloud() async {
+    // Validasi: judul, kategori, deskripsi, dan foto wajib diisi
+    final errors = <String, String>{};
+
+    if (_titleCtrl.text.trim().isEmpty) {
+      errors['title'] = 'Judul wajib diisi';
+    }
+    if (_selectedCategory == null) {
+      errors['category'] = 'Pilih kategori barang dulu ya';
+    }
+    if (_descCtrl.text.trim().isEmpty) {
+      errors['desc'] = 'Deskripsi wajib diisi';
+    }
+    if (_pickedImagePath == null || _pickedImagePath!.isEmpty) {
+      errors['image'] = 'Foto barang wajib ditambahkan untuk publish';
+    }
+
+    if (errors.isNotEmpty) {
+      setState(() {
+        _validationErrors
+          ..clear()
+          ..addAll(errors);
+      });
+      // Tampilkan pesan jika foto belum ada
+      if (errors.containsKey('image') && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tambahkan foto barang dulu sebelum publish.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Pastikan user sudah login anonim Firebase
+    final authService = ref.read(firebaseAuthServiceProvider);
+    if (authService.currentUser == null) {
+      await authService.signInAnonymously();
+    }
+
+    // Baca bytes dari XFile (kompatibel web + mobile)
+    final imageBytes = await _pickedXFile!.readAsBytes();
+
+    // Ambil nama profil user untuk disimpan ke Firestore
+    final profileUser = ref.read(authProvider);
+    final ownerName = profileUser?.name ?? 'Pengguna';
+
+    final success =
+        await ref.read(cloudItemNotifierProvider.notifier).publishItem(
+              title: _titleCtrl.text.trim(),
+              category: _selectedCategory!,
+              description: _descCtrl.text.trim(),
+              imageBytes: imageBytes,
+              ownerName: ownerName,
+            );
+
+    if (mounted) {
+      if (success) {
+        _resetForm();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Barang berhasil dipublish ke Cloud! ☁️'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal publish ke cloud. Coba lagi.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Reset semua field form ke kondisi awal.
+  void _resetForm() {
+    _titleCtrl.clear();
+    _descCtrl.clear();
+    _otherAddrCtrl.clear();
+    setState(() {
+      _selectedCategory = null;
+      _selectedMethods.clear();
+      _useProfileAddress = true;
+      _pickedImagePath = null;
+      _pickedXFile = null;
+      _validationErrors.clear();
+    });
+  }
+
   // ===========================================================================
   // BUILD — Memilih tampilan berdasarkan state dari Notifier
   // ===========================================================================
@@ -187,8 +281,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   @override
   Widget build(BuildContext context) {
     final postState = ref.watch(postItemNotifierProvider);
+    final publishState = ref.watch(cloudItemNotifierProvider);
     final p = Theme.of(context).extension<AppPalette>()!;
     final user = ref.watch(authProvider);
+
+    // Cek apakah sedang dalam proses publish ke cloud
+    final isPublishing = publishState is PublishLoading;
 
     return Scaffold(
       backgroundColor: p.bg,
@@ -228,7 +326,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
 
                 // ━━ KONDISI 2, 5, 6: Form ━━
                 PostItemLoaded() =>
-                  _buildForm(p, postState, user?.address ?? ''),
+                  _buildForm(p, postState, user?.address ?? '', isPublishing),
               },
             ),
           ],
@@ -387,8 +485,9 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ===========================================================================
 
   Widget _buildForm(
-      AppPalette p, PostItemLoaded loadedState, String profileAddress) {
-    final isSubmitting = loadedState.isSubmitting;
+      AppPalette p, PostItemLoaded loadedState, String profileAddress,
+      bool isPublishing) {
+    final isSubmitting = loadedState.isSubmitting || isPublishing;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -548,22 +647,20 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
 
         const SizedBox(height: 28),
 
-        // ── Tombol Submit ──
-        // ── KONDISI 6: Loading saat submit ──
+        // ── Tombol Utama: Publish (Firestore) ──
         SizedBox(
           height: 54,
           child: ElevatedButton(
-            onPressed: isSubmitting ? null : _handleSubmit,
+            onPressed: isSubmitting ? null : _handlePublishToCloud,
             style: ElevatedButton.styleFrom(
-              backgroundColor: p.accent,
+              backgroundColor: p.primary,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: p.accent.withValues(alpha: 0.6),
+              disabledBackgroundColor: p.primary.withValues(alpha: 0.6),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: isSubmitting
-                // ── KONDISI 6: Spinner di dalam tombol ──
+            child: isPublishing
                 ? const SizedBox(
                     height: 22,
                     width: 22,
@@ -573,7 +670,37 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                     ),
                   )
                 : const Text(
-                    'Kirim',
+                    'Publish',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // ── Tombol Sekunder: Simpan Lokal (ke state mock) ──
+        SizedBox(
+          height: 54,
+          child: OutlinedButton(
+            onPressed: isSubmitting ? null : _handleSubmit,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: p.accent,
+              side: BorderSide(color: p.accent),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: loadedState.isSubmitting
+                ? SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: p.accent,
+                    ),
+                  )
+                : const Text(
+                    'Simpan Lokal (Preview)',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
           ),

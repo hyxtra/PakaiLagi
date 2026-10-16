@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../models/item.dart';
-import '../providers/items_provider.dart';
-import '../providers/requests_provider.dart';
+import '../models/item_model.dart';
+import '../providers/cloud_item_provider.dart';
 import '../router/app_router.dart';
 import '../theme/app_palette.dart';
 import '../widgets/item_card.dart';
@@ -22,15 +22,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final myItems = ref.watch(myItemsProvider);
-    final outgoing = ref.watch(myOutgoingRequestsProvider);
-    final allItems = ref.watch(itemsProvider);
-
-    // POV peminta: barang yang sedang saya ajukan.
-    final requestedItems = outgoing
-        .map((r) => allItems.where((it) => it.id == r.itemId))
-        .expand((e) => e)
-        .toList();
+    final myCloudItems = ref.watch(myCloudItemsStreamProvider);
+    final outgoingRequestIds = ref.watch(myOutgoingCloudRequestItemIdsProvider);
+    final cloudItems = ref.watch(cloudItemsStreamProvider);
 
     return SafeArea(
       bottom: false,
@@ -40,7 +34,8 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             child: Text('Aktivitas',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: p.text)),
+                style: TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w700, color: p.text)),
           ),
           const SizedBox(height: 16),
           Padding(
@@ -55,21 +50,73 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
           Divider(height: 1, color: p.border),
           Expanded(
             child: _tab == 0
-                ? _list(
-                    requestedItems,
-                    'Belum ada pengajuan yang menunggu persetujuan.',
-                    showManage: false,
-                  )
-                : _list(
-                    myItems,
-                    'Kamu belum memposting barang.',
-                    showManage: true,
-                  ),
+                ? _outgoingCloudItems(outgoingRequestIds, cloudItems)
+                : _myCloudItems(myCloudItems),
           ),
         ],
       ),
     );
   }
+
+  Widget _outgoingCloudItems(
+    AsyncValue<List<String>> requestIds,
+    AsyncValue<List<ItemModel>> cloudItems,
+  ) {
+    final p = context.palette;
+    if (requestIds.isLoading || cloudItems.isLoading) {
+      return Center(child: CircularProgressIndicator(color: p.primary));
+    }
+    if (requestIds.hasError || cloudItems.hasError) {
+      return Center(
+        child: Text('Gagal memuat pengajuan kamu.',
+            style: TextStyle(color: p.textMuted)),
+      );
+    }
+    final ids = requestIds.valueOrNull?.toSet() ?? const <String>{};
+    final requestedItems = (cloudItems.valueOrNull ?? const <ItemModel>[])
+        .where((item) => ids.contains(item.id))
+        .map(_cloudToItem)
+        .toList();
+    return _list(
+        requestedItems, 'Belum ada pengajuan yang menunggu persetujuan.',
+        showManage: false);
+  }
+
+  Widget _myCloudItems(AsyncValue<List<ItemModel>> state) {
+    final p = context.palette;
+    return state.when(
+      loading: () => Center(child: CircularProgressIndicator(color: p.primary)),
+      error: (_, __) => Center(
+        child: Text('Gagal memuat barang kamu.',
+            style: TextStyle(color: p.textMuted)),
+      ),
+      data: (items) => _list(
+        items.map(_cloudToItem).toList(),
+        'Kamu belum memposting barang.',
+        showManage: true,
+      ),
+    );
+  }
+
+  Item _cloudToItem(ItemModel data) => Item(
+        id: data.id,
+        title: data.title,
+        category: data.category,
+        description: data.description,
+        ownerId: data.donorId,
+        ownerName: data.ownerName,
+        ownerPhone: '',
+        status: data.status == 'completed'
+            ? ItemStatus.completed
+            : data.status == 'reserved'
+                ? ItemStatus.reserved
+                : ItemStatus.available,
+        swatch: const Color(0xFF2F6B4F),
+        pickupMethods: const ['Ambil Sendiri'],
+        address: data.address,
+        imageUrl:
+            data.imageBase64.isEmpty ? null : 'base64:${data.imageBase64}',
+      );
 
   Widget _tabButton(String label, int index) {
     final p = context.palette;
@@ -108,7 +155,8 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(emptyText,
-              textAlign: TextAlign.center, style: TextStyle(color: p.textMuted, fontSize: 14)),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: p.textMuted, fontSize: 14)),
         ),
       );
     }
@@ -119,29 +167,46 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
         final item = items[i];
         return Column(
           children: [
-            ItemCard(item: item, onTap: () => context.push(AppRoutes.itemDetail(item.id))),
+            ItemCard(
+                item: item,
+                onTap: () => context.push(AppRoutes.itemDetail(item.id))),
             if (showManage && item.status != ItemStatus.completed)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 46,
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.push(AppRoutes.manageRequest(item.id)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: p.primary,
-                      side: BorderSide(color: p.primary),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.groups_outlined, size: 18),
-                    label: const Text('Kelola Pengajuan',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ),
+              _manageButton(item),
           ],
         );
       },
+    );
+  }
+
+  Widget _manageButton(Item item) {
+    final p = context.palette;
+    final requests = ref.watch(cloudRequestsForItemProvider(item.id));
+    final pending = requests.valueOrNull
+            ?.where((request) => request.status == 'pending')
+            .length ??
+        0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: OutlinedButton.icon(
+          onPressed: () => context.push(AppRoutes.manageRequest(item.id)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: p.primary,
+            side: BorderSide(color: p.primary),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          icon: const Icon(Icons.groups_outlined, size: 18),
+          label: Text(
+            pending == 0
+                ? 'Kelola Pengajuan'
+                : 'Kelola Pengajuan ($pending baru)',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -28,8 +28,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    ref.read(authProvider.notifier).signIn(name: _name.text, email: _email.text);
-    // Navigasi ditangani otomatis oleh redirect go_router.
+    ref
+        .read(authProvider.notifier)
+        .signIn(name: _name.text, email: _email.text);
   }
 
   @override
@@ -57,12 +58,16 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text('PakaiLagi',
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: p.text)),
+                    style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: p.text)),
                 const SizedBox(height: 6),
                 Text(
                   'Berbagi barang bekas layak pakai, gratis untuk sesama 💚',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: p.textMuted, height: 1.5),
+                  style:
+                      TextStyle(fontSize: 14, color: p.textMuted, height: 1.5),
                 ),
                 const SizedBox(height: 32),
 
@@ -87,8 +92,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     controller: _name,
                     hint: 'Nama lengkap',
                     icon: Icons.person_outline,
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Nama wajib diisi' : null,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Nama wajib diisi'
+                        : null,
                   ),
                 _field(
                   controller: _email,
@@ -96,8 +102,11 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   icon: Icons.mail_outline,
                   keyboardType: TextInputType.emailAddress,
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Email wajib diisi';
-                    final ok = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v.trim());
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Email wajib diisi';
+                    }
+                    final ok = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                        .hasMatch(v.trim());
                     return ok ? null : 'Format email tidak valid';
                   },
                 ),
@@ -108,7 +117,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   obscure: true,
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Kata sandi wajib diisi';
-                    return v.length < 6 ? 'Kata sandi minimal 6 karakter' : null;
+                    return v.length < 6
+                        ? 'Kata sandi minimal 6 karakter'
+                        : null;
                   },
                 ),
 
@@ -130,22 +141,21 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: p.accent,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
                     ),
                     child: Text(_masuk ? 'Masuk' : 'Buat Akun',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800)),
                   ),
                 ),
                 const SizedBox(height: 20),
                 Text(
                   'Dengan melanjutkan, kamu menyetujui Ketentuan Layanan & Kebijakan Privasi PakaiLagi.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.5, color: p.textMuted, height: 1.5),
+                  style: TextStyle(
+                      fontSize: 12.5, color: p.textMuted, height: 1.5),
                 ),
-                const SizedBox(height: 8),
-                Text('Coba: rani@pakailagi.id / budi@pakailagi.id (sandi bebas ≥6)',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 11.5, color: p.textMuted)),
               ],
             ),
           ),

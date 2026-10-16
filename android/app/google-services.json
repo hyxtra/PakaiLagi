@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "772093175926",
+    "project_id": "pakailagi-caf56",
+    "storage_bucket": "pakailagi-caf56.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:772093175926:android:4428e5df819acfc8dad757",
+        "android_client_info": {
+          "package_name": "com.pakailagi.pakailagi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHcZbMWKesImvVj7zrPNtZcRas_uIFzSo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

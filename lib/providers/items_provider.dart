@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/mock_data.dart';
 import '../models/item.dart';
 import 'auth_provider.dart';
 
 /// Sumber tunggal daftar barang. Dipakai bersama oleh Home, Detail, Activity,
 /// dan Post (barang baru benar-benar ditambahkan ke sini).
 class ItemsNotifier extends StateNotifier<List<Item>> {
-  ItemsNotifier() : super(List.of(seedItems));
+  /// Data lokal dimulai kosong. Daftar produksi berasal dari Firestore.
+  ItemsNotifier() : super(const []);
 
   void addItem({
     required String title,
@@ -40,7 +40,8 @@ class ItemsNotifier extends StateNotifier<List<Item>> {
 
   void setStatus(String itemId, ItemStatus status) {
     state = [
-      for (final it in state) it.id == itemId ? it.copyWith(status: status) : it,
+      for (final it in state)
+        it.id == itemId ? it.copyWith(status: status) : it,
     ];
   }
 

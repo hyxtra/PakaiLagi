@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/cloud_item_provider.dart';
 import '../providers/items_provider.dart';
 import '../providers/requests_provider.dart';
 import '../providers/theme_provider.dart';
+import '../repositories/firebase_repository.dart';
 import '../theme/app_palette.dart';
 
 enum _View { menu, edit, address, help }
@@ -25,16 +27,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       bottom: false,
       child: switch (_view) {
         _View.menu => _menu(),
-        _View.edit => _EditProfileView(onBack: () => setState(() => _view = _View.menu)),
-        _View.address => _AddressView(onBack: () => setState(() => _view = _View.menu)),
-        _View.help => _HelpView(onBack: () => setState(() => _view = _View.menu)),
+        _View.edit =>
+          _EditProfileView(onBack: () => setState(() => _view = _View.menu)),
+        _View.address =>
+          _AddressView(onBack: () => setState(() => _view = _View.menu)),
+        _View.help =>
+          _HelpView(onBack: () => setState(() => _view = _View.menu)),
       },
     );
   }
 
   Widget _menu() {
     final p = context.palette;
-    final user = ref.watch(authProvider);
+    final mockUser = ref.watch(authProvider);
+    final cloudUser = ref.watch(cloudProfileProvider).valueOrNull;
+    final user = cloudUser ?? mockUser;
     final isDark = ref.watch(themeModeProvider);
     final myItems = ref.watch(myItemsProvider).length;
     final given = ref
@@ -47,7 +54,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
         Text('Profil',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: p.text)),
+            style: TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w700, color: p.text)),
         const SizedBox(height: 18),
         // Kartu identitas
         Container(
@@ -64,7 +72,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 backgroundColor: p.primary,
                 child: Text(user?.initials ?? '?',
                     style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white)),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -72,7 +82,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(user?.name ?? 'Pengguna',
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: p.text)),
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: p.text)),
                     const SizedBox(height: 3),
                     Text(user?.email ?? '-',
                         style: TextStyle(fontSize: 13, color: p.textMuted)),
@@ -105,11 +118,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           child: Row(
             children: [
-              Icon(isDark ? Icons.dark_mode : Icons.light_mode, size: 20, color: p.primary),
+              Icon(isDark ? Icons.dark_mode : Icons.light_mode,
+                  size: 20, color: p.primary),
               const SizedBox(width: 14),
               Expanded(
                 child: Text('Mode Gelap',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: p.text)),
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: p.text)),
               ),
               Switch(
                 value: isDark,
@@ -130,7 +147,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           child: Column(
             children: [
-              _menuTile(Icons.edit_outlined, 'Edit Profil', () => setState(() => _view = _View.edit)),
+              _menuTile(Icons.edit_outlined, 'Edit Profil',
+                  () => setState(() => _view = _View.edit)),
               _divider(),
               _menuTile(Icons.location_on_outlined, 'Alamat Pengambilan',
                   () => setState(() => _view = _View.address)),
@@ -148,10 +166,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             style: OutlinedButton.styleFrom(
               foregroundColor: p.danger,
               side: BorderSide(color: p.danger.withValues(alpha: 0.5)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
             ),
             icon: const Icon(Icons.logout, size: 19),
-            label: const Text('Keluar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+            label: const Text('Keluar',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
           ),
         ),
       ],
@@ -170,7 +190,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
         child: Column(
           children: [
-            Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: p.primary)),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    color: p.primary)),
             const SizedBox(height: 2),
             Text(label, style: TextStyle(fontSize: 11.5, color: p.textMuted)),
           ],
@@ -184,7 +208,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return ListTile(
       onTap: onTap,
       leading: Icon(icon, size: 21, color: p.primary),
-      title: Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: p.text)),
+      title: Text(label,
+          style: TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w700, color: p.text)),
       trailing: Icon(Icons.chevron_right, color: p.textMuted),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );
@@ -213,7 +239,8 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
   @override
   void initState() {
     super.initState();
-    final u = ref.read(authProvider);
+    final u =
+        ref.read(cloudProfileProvider).valueOrNull ?? ref.read(authProvider);
     _name = TextEditingController(text: u?.name ?? '');
     _email = TextEditingController(text: u?.email ?? '');
     _phone = TextEditingController(text: u?.phone ?? '');
@@ -234,16 +261,36 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
       onBack: widget.onBack,
       children: [
         _LabeledField(label: 'Nama Lengkap', controller: _name),
-        _LabeledField(label: 'Email', controller: _email, keyboardType: TextInputType.emailAddress),
-        _LabeledField(label: 'Nomor HP', controller: _phone, keyboardType: TextInputType.phone),
+        _LabeledField(
+            label: 'Email',
+            controller: _email,
+            keyboardType: TextInputType.emailAddress),
+        _LabeledField(
+            label: 'Nomor HP',
+            controller: _phone,
+            keyboardType: TextInputType.phone),
         const SizedBox(height: 8),
-        _SaveButton(onPressed: () {
-          ref.read(authProvider.notifier).updateUser(
-                name: _name.text.trim(),
-                email: _email.text.trim(),
-                phone: _phone.text.trim(),
-              );
-          _done(context, 'Profil berhasil diperbarui ✅');
+        _SaveButton(onPressed: () async {
+          final current = ref.read(cloudProfileProvider).valueOrNull ??
+              ref.read(authProvider);
+          try {
+            await ref.read(firebaseRepositoryProvider).saveMyProfile(
+                  name: _name.text.trim(),
+                  email: _email.text.trim(),
+                  phone: _phone.text.trim(),
+                  address: current?.address ?? '',
+                );
+            ref.read(authProvider.notifier).updateUser(
+                  name: _name.text.trim(),
+                  email: _email.text.trim(),
+                  phone: _phone.text.trim(),
+                );
+            if (context.mounted) _done(context, 'Profil berhasil diperbarui');
+          } catch (_) {
+            if (context.mounted) {
+              _done(context, 'Gagal menyimpan profil. Coba lagi.');
+            }
+          }
         }),
       ],
     );
@@ -265,7 +312,9 @@ class _AddressViewState extends ConsumerState<_AddressView> {
   @override
   void initState() {
     super.initState();
-    _addr = TextEditingController(text: ref.read(authProvider)?.address ?? '');
+    final user =
+        ref.read(cloudProfileProvider).valueOrNull ?? ref.read(authProvider);
+    _addr = TextEditingController(text: user?.address ?? '');
   }
 
   @override
@@ -287,9 +336,27 @@ class _AddressViewState extends ConsumerState<_AddressView> {
           hint: 'Mis. Jl. Kenanga No. 10, Kel. Melati, Jakarta Selatan',
         ),
         const SizedBox(height: 8),
-        _SaveButton(onPressed: () {
-          ref.read(authProvider.notifier).updateUser(address: _addr.text.trim());
-          _done(context, 'Alamat pengambilan tersimpan ✅');
+        _SaveButton(onPressed: () async {
+          final current = ref.read(cloudProfileProvider).valueOrNull ??
+              ref.read(authProvider);
+          try {
+            await ref.read(firebaseRepositoryProvider).saveMyProfile(
+                  name: current?.name ?? 'Pengguna',
+                  email: current?.email ?? '',
+                  phone: current?.phone ?? '',
+                  address: _addr.text.trim(),
+                );
+            ref
+                .read(authProvider.notifier)
+                .updateUser(address: _addr.text.trim());
+            if (context.mounted) {
+              _done(context, 'Alamat pengambilan tersimpan');
+            }
+          } catch (_) {
+            if (context.mounted) {
+              _done(context, 'Gagal menyimpan alamat. Coba lagi.');
+            }
+          }
         }),
       ],
     );
@@ -302,14 +369,22 @@ class _HelpView extends StatelessWidget {
   final VoidCallback onBack;
 
   static const _faqs = [
-    ('Bagaimana cara memberi barang?',
-        'Buka tab Posting, isi detail barang, pilih metode & alamat pengambilan, lalu tekan Posting Barang.'),
-    ('Bagaimana cara meminta barang?',
-        'Buka detail barang di Beranda, tekan Ajukan Pengambilan, pilih metode, lalu konfirmasi.'),
-    ('Apakah benar-benar gratis?',
-        'Ya. PakaiLagi adalah platform berbagi barang bekas layak pakai, gratis untuk sesama.'),
-    ('Bagaimana koordinasi dengan pemberi?',
-        'Gunakan fitur Chat pada detail barang untuk menyepakati waktu & lokasi pengambilan.'),
+    (
+      'Bagaimana cara memberi barang?',
+      'Buka tab Posting, isi detail barang, pilih metode & alamat pengambilan, lalu tekan Posting Barang.'
+    ),
+    (
+      'Bagaimana cara meminta barang?',
+      'Buka detail barang di Beranda, tekan Ajukan Pengambilan, pilih metode, lalu konfirmasi.'
+    ),
+    (
+      'Apakah benar-benar gratis?',
+      'Ya. PakaiLagi adalah platform berbagi barang bekas layak pakai, gratis untuk sesama.'
+    ),
+    (
+      'Bagaimana koordinasi dengan pemberi?',
+      'Gunakan fitur Chat pada detail barang untuk menyepakati waktu & lokasi pengambilan.'
+    ),
   ];
 
   @override
@@ -332,9 +407,14 @@ class _HelpView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(f.$1,
-                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: p.text)),
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: p.text)),
                 const SizedBox(height: 6),
-                Text(f.$2, style: TextStyle(fontSize: 13.5, height: 1.5, color: p.textMuted)),
+                Text(f.$2,
+                    style: TextStyle(
+                        fontSize: 13.5, height: 1.5, color: p.textMuted)),
               ],
             ),
           ),
@@ -345,7 +425,8 @@ class _HelpView extends StatelessWidget {
 
 /// ------- Helper widgets untuk sub-view -------
 class _SubScaffold extends StatelessWidget {
-  const _SubScaffold({required this.title, required this.onBack, required this.children});
+  const _SubScaffold(
+      {required this.title, required this.onBack, required this.children});
   final String title;
   final VoidCallback onBack;
   final List<Widget> children;
@@ -360,8 +441,14 @@ class _SubScaffold extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 8, 20, 8),
           child: Row(
             children: [
-              IconButton(icon: Icon(Icons.arrow_back, color: p.text), onPressed: onBack),
-              Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: p.text)),
+              IconButton(
+                  icon: Icon(Icons.arrow_back, color: p.text),
+                  onPressed: onBack),
+              Text(title,
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: p.text)),
             ],
           ),
         ),
@@ -402,7 +489,10 @@ class _LabeledField extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 8, left: 2),
             child: Text(label,
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: p.text)),
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: p.text)),
           ),
           TextField(
             controller: controller,
@@ -414,7 +504,8 @@ class _LabeledField extends StatelessWidget {
               hintStyle: TextStyle(color: p.textMuted),
               filled: true,
               fillColor: p.surface,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: BorderSide(color: p.border),
@@ -446,9 +537,11 @@ class _SaveButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: p.accent,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
-        child: const Text('Simpan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        child: const Text('Simpan',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
       ),
     );
   }

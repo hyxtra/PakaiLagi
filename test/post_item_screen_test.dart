@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pakailagi/models/item.dart';
 import 'package:pakailagi/notifiers/item_notifier.dart';
 import 'package:pakailagi/notifiers/item_state.dart';
+import 'package:pakailagi/providers/cloud_item_provider.dart';
 import 'package:pakailagi/repositories/item_repository.dart';
 import 'package:pakailagi/screens/post_item_screen.dart';
 import 'package:pakailagi/theme/app_palette.dart';
@@ -16,6 +17,7 @@ import 'package:pakailagi/theme/app_palette.dart';
 // Teknik testing:
 // - Override [postItemNotifierProvider] langsung dengan state yang diinginkan,
 //   sehingga test deterministik tanpa bergantung pada async timer.
+// - Override [cloudItemNotifierProvider] agar tidak membutuhkan Firebase.
 // - Menggunakan [ProviderScope.overrides] agar test terisolasi.
 // =============================================================================
 
@@ -33,6 +35,11 @@ Widget _buildTestAppWithState(PostItemState initialState) {
   return ProviderScope(
     overrides: [
       postItemNotifierProvider.overrideWith((_) => notifier),
+      // Override cloudItemNotifier langsung dengan state Idle
+      // agar test tidak butuh Firebase dependency.
+      cloudItemNotifierProvider.overrideWith(
+        (ref) => _StubCloudItemNotifier(),
+      ),
     ],
     child: MaterialApp(
       theme: ThemeData(extensions: const [AppPalette.light]),
@@ -69,6 +76,17 @@ class _FakePostItemNotifier extends PostItemNotifier {
     // Simulasikan submit sukses tanpa side-effect
     return true;
   }
+}
+
+/// Stub CloudItemNotifier — state tetap Idle, tidak butuh Firebase.
+/// Extends StateNotifier<PublishState> langsung, bukan CloudItemNotifier,
+/// agar tidak perlu FirebaseRepository sebagai dependency.
+class _StubCloudItemNotifier extends StateNotifier<PublishState>
+    implements CloudItemNotifier {
+  _StubCloudItemNotifier() : super(const PublishIdle());
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
 
 /// Stub repository dengan delay 0 — hanya memenuhi konstruktor notifier.
@@ -149,12 +167,20 @@ void main() {
     expect(find.text('Alamat Penjemputan'), findsOneWidget);
 
     await tester.dragUntilVisible(
-      find.text('Kirim'),
+      find.text('Publish'),
       listView,
       const Offset(0, -300),
     );
-    // Verifikasi: tombol submit tampil
-    expect(find.text('Kirim'), findsOneWidget);
+    // Verifikasi: tombol publish tampil
+    expect(find.text('Publish'), findsOneWidget);
+
+    // Scroll lagi ke bawah untuk tombol simpan lokal
+    await tester.dragUntilVisible(
+      find.text('Simpan Lokal (Preview)'),
+      listView,
+      const Offset(0, -200),
+    );
+    expect(find.text('Simpan Lokal (Preview)'), findsOneWidget);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -198,7 +224,7 @@ void main() {
     // Verifikasi: icon error tampil
     expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
     // Verifikasi: form TIDAK tampil
-    expect(find.text('Kirim'), findsNothing);
+    expect(find.text('Publish'), findsNothing);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -214,14 +240,14 @@ void main() {
       ),
     );
 
-    // Scroll ke bawah sampai tombol "Kirim" terlihat lalu tap
+    // Scroll ke bawah sampai tombol "Simpan Lokal (Preview)" terlihat lalu tap
     final listView = find.byType(ListView);
     await tester.dragUntilVisible(
-      find.text('Kirim'),
+      find.text('Simpan Lokal (Preview)'),
       listView,
       const Offset(0, -200),
     );
-    await tester.tap(find.text('Kirim'));
+    await tester.tap(find.text('Simpan Lokal (Preview)'));
     await tester.pump();
 
     // Verifikasi pesan error di atas (scroll balik ke atas)
@@ -259,20 +285,26 @@ void main() {
       ),
     );
 
-    // Scroll ke bawah agar tombol terlihat
+    // Scroll ke bawah agar OutlinedButton (Simpan Lokal) terlihat
+    // Saat isSubmitting=true, spinner muncul di dalam OutlinedButton
     final listView = find.byType(ListView);
     await tester.dragUntilVisible(
-      find.byType(ElevatedButton),
+      find.byType(OutlinedButton),
       listView,
-      const Offset(0, -200),
+      const Offset(0, -300),
     );
 
-    // Verifikasi: CircularProgressIndicator muncul DI DALAM tombol
+    // Verifikasi: CircularProgressIndicator muncul di dalam OutlinedButton
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    // Verifikasi: teks "Kirim" sudah TIDAK tampil (diganti spinner)
-    expect(find.text('Kirim'), findsNothing);
-    // Verifikasi: tombol ElevatedButton ada tapi onPressed null (disabled)
-    final button = tester.widget<ElevatedButton>(find.byType(ElevatedButton));
-    expect(button.onPressed, isNull);
+    // Verifikasi: teks "Simpan Lokal (Preview)" TIDAK tampil (diganti spinner)
+    expect(find.text('Simpan Lokal (Preview)'), findsNothing);
+    // Verifikasi: OutlinedButton disabled (onPressed == null)
+    final outlinedButton =
+        tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+    expect(outlinedButton.onPressed, isNull);
+    // Verifikasi: ElevatedButton juga disabled
+    final elevatedButton =
+        tester.widget<ElevatedButton>(find.byType(ElevatedButton).first);
+    expect(elevatedButton.onPressed, isNull);
   });
 }

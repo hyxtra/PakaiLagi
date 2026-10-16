@@ -10,6 +10,7 @@ import '../screens/item_detail_screen.dart';
 import '../screens/manage_request_screen.dart';
 import '../screens/post_item_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/public_feed_screen.dart';
 import '../screens/sign_in_screen.dart';
 import '../widgets/scaffold_with_nav_bar.dart';
 
@@ -23,6 +24,7 @@ abstract class AppRoutes {
 
   static String itemDetail(String id) => '/item/$id';
   static String manageRequest(String id) => '/manage-request/$id';
+  static const publicFeed = '/public-feed';
   static String chat(String itemId, String peerName) =>
       '/chat/$itemId?peer=${Uri.encodeComponent(peerName)}';
 }
@@ -100,6 +102,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           itemId: state.pathParameters['itemId']!,
           peerName: state.uri.queryParameters['peer'] ?? 'Pengguna',
         ),
+      ),
+
+      // Route full-screen: Katalog Online (Firestore)
+      GoRoute(
+        parentNavigatorKey: _rootKey,
+        path: AppRoutes.publicFeed,
+        builder: (_, __) => const PublicFeedScreen(),
       ),
     ],
   );
