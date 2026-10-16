@@ -106,7 +106,3 @@ dart analyze lib test
 ```
 
 Hasil terakhir: `No issues found!`.
-
-## 5. Batasan Pengujian
-
-`item_local_crud_test.dart` adalah unit test kontrak data berbasis memori sehingga aman dan tidak menulis data Firebase produksi. Pengujian integrasi Firestore sungguhan sebaiknya menggunakan Firebase Emulator Suite atau proyek Firebase khusus testing.
