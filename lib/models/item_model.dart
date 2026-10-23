@@ -1,6 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../business/image_base64.dart';
 
 // =============================================================================
 // FILE 1: item_model.dart
@@ -70,12 +71,7 @@ class ItemModel {
 
   /// Bytes gambar untuk Image.memory; null untuk gambar kosong/rusak.
   Uint8List? get imageBytes {
-    if (imageBase64.isEmpty) return null;
-    try {
-      return base64Decode(imageBase64);
-    } on FormatException {
-      return null;
-    }
+    return ImageBase64.decodeOrNull(imageBase64);
   }
 
   @override

@@ -8,7 +8,7 @@ import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_item_provider.dart';
-import '../providers/items_provider.dart';
+import '../providers/notification_provider.dart';
 import '../router/app_router.dart';
 import '../theme/app_palette.dart';
 import '../widgets/item_card.dart';
@@ -48,7 +48,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final user = ref.watch(authProvider);
-    final localItems = ref.watch(itemsProvider);
+    final unreadNotifications =
+        ref.watch(unreadCloudNotificationsCountProvider);
 
     // Ambil data dari Firestore (cloud)
     final cloudAsync = ref.watch(cloudItemsStreamProvider);
@@ -58,8 +59,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       error: (_, __) => <Item>[],
     );
 
-    // Gabung: cloud items di atas, lalu local items
-    final allItems = [...cloudItems, ...localItems];
+    final allItems = cloudItems;
 
     final filtered = allItems.where((it) {
       if (it.status != ItemStatus.available) return false;
@@ -95,14 +95,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                      color: p.surfaceAlt,
-                      borderRadius: BorderRadius.circular(14)),
-                  child: Icon(Icons.notifications_none,
-                      size: 20, color: p.primary),
+                InkWell(
+                  onTap: () => context.push(AppRoutes.notifications),
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                              color: p.surfaceAlt,
+                              borderRadius: BorderRadius.circular(14)),
+                          child: Icon(Icons.notifications_none,
+                              size: 20, color: p.primary),
+                        ),
+                        if (unreadNotifications > 0)
+                          Positioned(
+                            top: 7,
+                            right: 7,
+                            child: Container(
+                              constraints: const BoxConstraints(minWidth: 16),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              alignment: Alignment.center,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                color: p.danger,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                unreadNotifications > 9
+                                    ? '9+'
+                                    : '$unreadNotifications',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),

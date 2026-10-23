@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +8,9 @@ import '../services/firebase_auth_service.dart';
 import '../models/item_model.dart';
 import '../models/app_user.dart';
 import '../models/cloud_pickup_request.dart';
+import '../models/cloud_notification.dart';
+import '../business/image_base64.dart';
+import '../business/item_status_rules.dart';
 
 // =============================================================================
 // firebase_repository.dart
@@ -50,6 +52,7 @@ class FirebaseRepository {
   static const String _itemsCollection = 'items';
   static const String _requestsCollection = 'pickupRequests';
   static const String _profilesCollection = 'profiles';
+  static const String _notificationsCollection = 'notifications';
 
   // ---------------------------------------------------------------------------
   // HELPER: Encode bytes gambar ke Base64
@@ -63,7 +66,7 @@ class FirebaseRepository {
   }
 
   /// Fungsi top-level yang bisa dijalankan di isolate via `compute`.
-  static String _base64Encode(Uint8List bytes) => base64Encode(bytes);
+  static String _base64Encode(Uint8List bytes) => ImageBase64.encode(bytes);
 
   // ---------------------------------------------------------------------------
   // CREATE — Simpan barang baru ke Firestore
@@ -153,10 +156,15 @@ class FirebaseRepository {
       _firestore.collection(_itemsCollection).doc(itemId).delete();
 
   /// UPDATE status barang melalui Cloud Firestore.
-  Future<void> updateItemStatus(String itemId, String status) => _firestore
-      .collection(_itemsCollection)
-      .doc(itemId)
-      .update({'status': status, 'updatedAt': FieldValue.serverTimestamp()});
+  Future<void> updateItemStatus(String itemId, String status) {
+    if (!ItemStatusRules.isValid(status)) {
+      throw ArgumentError.value(status, 'status', 'Status item tidak valid');
+    }
+    return _firestore
+        .collection(_itemsCollection)
+        .doc(itemId)
+        .update({'status': status, 'updatedAt': FieldValue.serverTimestamp()});
+  }
 
   Future<void> createPickupRequest({
     required String itemId,
@@ -193,6 +201,14 @@ class FirebaseRepository {
       'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
     });
+    await _createNotification(
+      recipientId: ownerId,
+      senderName: requesterName,
+      title: 'Pengajuan baru',
+      body:
+          '$requesterName ingin mengambil "${itemData['title'] as String? ?? 'barang Anda'}".',
+      itemId: itemId,
+    );
   }
 
   Stream<List<String>> getMyOutgoingRequestItemIds(String requesterId) {
@@ -221,6 +237,13 @@ class FirebaseRepository {
     required String itemId,
     required bool accepted,
   }) async {
+    final requestDoc =
+        await _firestore.collection(_requestsCollection).doc(requestId).get();
+    final requestData = requestDoc.data();
+    if (requestData == null) throw Exception('Pengajuan tidak ditemukan.');
+    final itemDoc =
+        await _firestore.collection(_itemsCollection).doc(itemId).get();
+    final itemData = itemDoc.data() ?? const <String, dynamic>{};
     final batch = _firestore.batch();
     batch.update(_firestore.collection(_requestsCollection).doc(requestId), {
       'status': accepted ? 'accepted' : 'rejected',
@@ -232,6 +255,53 @@ class FirebaseRepository {
       });
     }
     await batch.commit();
+    await _createNotification(
+      recipientId: requestData['requesterId'] as String? ?? '',
+      senderName: itemData['ownerName'] as String? ?? 'Pemberi barang',
+      title: accepted ? 'Pengajuan diterima' : 'Pengajuan ditolak',
+      body: accepted
+          ? 'Pengajuan Anda untuk "${itemData['title'] as String? ?? 'barang'}" telah diterima.'
+          : 'Pengajuan Anda untuk "${itemData['title'] as String? ?? 'barang'}" belum dapat diterima.',
+      itemId: itemId,
+    );
+  }
+
+  Future<void> _createNotification({
+    required String recipientId,
+    required String senderName,
+    required String title,
+    required String body,
+    required String itemId,
+  }) {
+    if (recipientId.isEmpty) return Future.value();
+    return _firestore.collection(_notificationsCollection).add({
+      'recipientId': recipientId,
+      'senderName': senderName,
+      'title': title,
+      'body': body,
+      'itemId': itemId,
+      'isRead': false,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<List<CloudNotification>> getMyNotifications([String? recipientId]) {
+    final uid = recipientId ?? _authService.currentUid;
+    if (uid == null) return Stream.value(const []);
+    return _firestore
+        .collection(_notificationsCollection)
+        .where('recipientId', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map(CloudNotification.fromFirestore).toList());
+  }
+
+  Future<void> markNotificationAsRead(String notificationId) {
+    return _firestore
+        .collection(_notificationsCollection)
+        .doc(notificationId)
+        .update({'isRead': true});
   }
 
   Stream<AppUser?> getMyProfile(String uid) {

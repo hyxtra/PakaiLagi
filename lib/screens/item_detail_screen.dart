@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/pickup_methods.dart';
+import '../business/item_ownership.dart';
 import '../models/item.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_item_provider.dart';
@@ -76,7 +77,11 @@ class ItemDetailScreen extends ConsumerWidget {
     final firebaseUid = ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
 
     final ownedByMe = user != null && item.ownerId == user.id;
-    final canDeleteCloudItem = isCloudItem && firebaseUid == item.ownerId;
+    final canDeleteCloudItem = isCloudItem &&
+        ItemOwnership.canModify(
+          donorId: item.ownerId,
+          currentUserId: firebaseUid,
+        );
     final available = item.status == ItemStatus.available;
 
     return Scaffold(

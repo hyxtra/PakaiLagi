@@ -97,12 +97,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
       ),
     );
     if (source == null) return;
-    final picked =
-        await ImagePicker().pickImage(source: source, maxWidth: 600);
+    final picked = await ImagePicker().pickImage(source: source, maxWidth: 600);
     if (picked != null) {
       setState(() {
         _pickedImagePath = picked.path;
         _pickedXFile = picked;
+        _validationErrors.remove('image');
       });
     }
   }
@@ -144,38 +144,6 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // SUBMIT HANDLER (Lokal — ke state mock)
   // ---------------------------------------------------------------------------
 
-  Future<void> _handleSubmit() async {
-    // ── KONDISI 5: Cek validasi dulu ──
-    if (!_validateForm()) return;
-
-    final user = ref.read(authProvider);
-    if (user == null) return;
-
-    final address =
-        _useProfileAddress ? user.address : _otherAddrCtrl.text.trim();
-
-    // ── KONDISI 6: Panggil notifier.submitItem → isSubmitting jadi true ──
-    final success =
-        await ref.read(postItemNotifierProvider.notifier).submitItem(
-              title: _titleCtrl.text.trim(),
-              category: _selectedCategory!,
-              description: _descCtrl.text.trim(),
-              pickupMethods: _selectedMethods.toList(),
-              address: address,
-              imageUrl: _pickedImagePath,
-            );
-
-    if (success && mounted) {
-      _resetForm();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Barang berhasil diposting! 🎉'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // PUBLISH KE CLOUD HANDLER — Firebase Firestore + Base64
   // ---------------------------------------------------------------------------
@@ -183,37 +151,22 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   /// Publish barang langsung ke Firestore.
   /// Gambar di-encode menjadi Base64 string (tanpa Firebase Storage).
   Future<void> _handlePublishToCloud() async {
-    // Validasi: judul, kategori, deskripsi, dan foto wajib diisi
-    final errors = <String, String>{};
-
-    if (_titleCtrl.text.trim().isEmpty) {
-      errors['title'] = 'Judul wajib diisi';
-    }
-    if (_selectedCategory == null) {
-      errors['category'] = 'Pilih kategori barang dulu ya';
-    }
-    if (_descCtrl.text.trim().isEmpty) {
-      errors['desc'] = 'Deskripsi wajib diisi';
-    }
-    if (_pickedImagePath == null || _pickedImagePath!.isEmpty) {
-      errors['image'] = 'Foto barang wajib ditambahkan untuk publish';
-    }
-
-    if (errors.isNotEmpty) {
+    final isFormValid = _validateForm();
+    final hasImage = _pickedImagePath != null && _pickedImagePath!.isNotEmpty;
+    if (!hasImage) {
       setState(() {
-        _validationErrors
-          ..clear()
-          ..addAll(errors);
+        _validationErrors['image'] = 'Foto barang wajib ditambahkan untuk post';
       });
-      // Tampilkan pesan jika foto belum ada
-      if (errors.containsKey('image') && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Tambahkan foto barang dulu sebelum publish.'),
+            content: Text('Tambahkan foto barang dulu sebelum post.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
+    }
+    if (!isFormValid || !hasImage) {
       return;
     }
 
@@ -244,14 +197,14 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         _resetForm();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Barang berhasil dipublish ke Cloud! ☁️'),
+            content: Text('Barang berhasil diposting!'),
             behavior: SnackBarBehavior.floating,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Gagal publish ke cloud. Coba lagi.'),
+            content: Text('Gagal memposting barang. Coba lagi.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -484,9 +437,8 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // + KONDISI 6: Loading Saat Submit
   // ===========================================================================
 
-  Widget _buildForm(
-      AppPalette p, PostItemLoaded loadedState, String profileAddress,
-      bool isPublishing) {
+  Widget _buildForm(AppPalette p, PostItemLoaded loadedState,
+      String profileAddress, bool isPublishing) {
     final isSubmitting = loadedState.isSubmitting || isPublishing;
 
     return ListView(
@@ -523,6 +475,8 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                         fit: BoxFit.cover, width: double.infinity),
           ),
         ),
+        if (_validationErrors['image'] != null)
+          _errorText(p, _validationErrors['image']!),
 
         const SizedBox(height: 20),
 
@@ -660,7 +614,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: isPublishing
+            child: isSubmitting
                 ? const SizedBox(
                     height: 22,
                     width: 22,
@@ -670,37 +624,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                     ),
                   )
                 : const Text(
-                    'Publish',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
-        // ── Tombol Sekunder: Simpan Lokal (ke state mock) ──
-        SizedBox(
-          height: 54,
-          child: OutlinedButton(
-            onPressed: isSubmitting ? null : _handleSubmit,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: p.accent,
-              side: BorderSide(color: p.accent),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: loadedState.isSubmitting
-                ? SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: p.accent,
-                    ),
-                  )
-                : const Text(
-                    'Simpan Lokal (Preview)',
+                    'Post',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
           ),

@@ -8,6 +8,7 @@ import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/item_detail_screen.dart';
 import '../screens/manage_request_screen.dart';
+import '../screens/notifications_screen.dart';
 import '../screens/post_item_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/public_feed_screen.dart';
@@ -21,6 +22,7 @@ abstract class AppRoutes {
   static const post = '/post';
   static const activity = '/activity';
   static const profile = '/profile';
+  static const notifications = '/notifications';
 
   static String itemDetail(String id) => '/item/$id';
   static String manageRequest(String id) => '/manage-request/$id';
@@ -102,6 +104,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           itemId: state.pathParameters['itemId']!,
           peerName: state.uri.queryParameters['peer'] ?? 'Pengguna',
         ),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootKey,
+        path: AppRoutes.notifications,
+        builder: (_, __) => const NotificationsScreen(),
       ),
 
       // Route full-screen: Katalog Online (Firestore)
