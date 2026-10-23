@@ -167,20 +167,12 @@ void main() {
     expect(find.text('Alamat Penjemputan'), findsOneWidget);
 
     await tester.dragUntilVisible(
-      find.text('Publish'),
+      find.text('Post'),
       listView,
       const Offset(0, -300),
     );
-    // Verifikasi: tombol publish tampil
-    expect(find.text('Publish'), findsOneWidget);
-
-    // Scroll lagi ke bawah untuk tombol simpan lokal
-    await tester.dragUntilVisible(
-      find.text('Simpan Lokal (Preview)'),
-      listView,
-      const Offset(0, -200),
-    );
-    expect(find.text('Simpan Lokal (Preview)'), findsOneWidget);
+    expect(find.text('Post'), findsOneWidget);
+    expect(find.text('Simpan Lokal (Preview)'), findsNothing);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -224,7 +216,7 @@ void main() {
     // Verifikasi: icon error tampil
     expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
     // Verifikasi: form TIDAK tampil
-    expect(find.text('Publish'), findsNothing);
+    expect(find.text('Post'), findsNothing);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -240,14 +232,14 @@ void main() {
       ),
     );
 
-    // Scroll ke bawah sampai tombol "Simpan Lokal (Preview)" terlihat lalu tap
+    // Scroll ke bawah sampai tombol Post terlihat lalu tap.
     final listView = find.byType(ListView);
     await tester.dragUntilVisible(
-      find.text('Simpan Lokal (Preview)'),
+      find.text('Post'),
       listView,
       const Offset(0, -200),
     );
-    await tester.tap(find.text('Simpan Lokal (Preview)'));
+    await tester.tap(find.text('Post'));
     await tester.pump();
 
     // Verifikasi pesan error di atas (scroll balik ke atas)
@@ -260,13 +252,6 @@ void main() {
     expect(find.text('Judul wajib diisi'), findsOneWidget);
     expect(find.text('Pilih kategori barang dulu ya'), findsOneWidget);
     expect(find.text('Deskripsi wajib diisi'), findsOneWidget);
-    // Scroll ke bawah lagi untuk verifikasi error metode
-    await tester.dragUntilVisible(
-      find.text('Pilih minimal satu metode pengambilan'),
-      listView,
-      const Offset(0, -300),
-    );
-    expect(find.text('Pilih minimal satu metode pengambilan'), findsOneWidget);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -285,24 +270,18 @@ void main() {
       ),
     );
 
-    // Scroll ke bawah agar OutlinedButton (Simpan Lokal) terlihat
-    // Saat isSubmitting=true, spinner muncul di dalam OutlinedButton
+    // Scroll ke bawah agar tombol Post terlihat.
     final listView = find.byType(ListView);
     await tester.dragUntilVisible(
-      find.byType(OutlinedButton),
+      find.byType(ElevatedButton),
       listView,
       const Offset(0, -300),
     );
 
-    // Verifikasi: CircularProgressIndicator muncul di dalam OutlinedButton
+    // Verifikasi: CircularProgressIndicator muncul di dalam tombol Post.
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    // Verifikasi: teks "Simpan Lokal (Preview)" TIDAK tampil (diganti spinner)
-    expect(find.text('Simpan Lokal (Preview)'), findsNothing);
-    // Verifikasi: OutlinedButton disabled (onPressed == null)
-    final outlinedButton =
-        tester.widget<OutlinedButton>(find.byType(OutlinedButton));
-    expect(outlinedButton.onPressed, isNull);
-    // Verifikasi: ElevatedButton juga disabled
+    expect(find.text('Post'), findsNothing);
+    // Verifikasi: ElevatedButton disabled selama submit.
     final elevatedButton =
         tester.widget<ElevatedButton>(find.byType(ElevatedButton).first);
     expect(elevatedButton.onPressed, isNull);
