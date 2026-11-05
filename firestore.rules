@@ -1,0 +1,179 @@
+rules_version = '2';
+
+// =============================================================================
+// Firestore Security Rules — PakaiLagi
+//
+// Struktur data:
+//   profiles/{uid}                    privat: hanya pemilik akun
+//   items/{itemId}                    publik (perlu login): TANPA alamat lengkap,
+//                                     hanya kelurahan & kota
+//   items/{itemId}/private/location   alamat lengkap + koordinat GPS:
+//                                     pemilik & peminta yang diterima
+//   pickupRequests/{itemId}_{uid}     pengajuan: peminta & pemilik barang
+//   notifications/{id}                hanya penerima yang bisa membaca
+//
+// Deploy: firebase deploy --only firestore:rules
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function itemPath(itemId) {
+      return /databases/$(database)/documents/items/$(itemId);
+    }
+
+    function requestPath(itemId, requesterId) {
+      return /databases/$(database)/documents/pickupRequests/$(itemId + '_' + requesterId);
+    }
+
+    // Peminta yang pengajuannya sudah diterima pemilik barang.
+    function isAcceptedRequester(itemId) {
+      let path = requestPath(itemId, uid());
+      return exists(path) && get(path).data.status == 'accepted';
+    }
+
+    // -------------------------------------------------------------------------
+    // PROFIL — berisi nama, email, nomor HP, alamat lengkap, koordinat.
+    // -------------------------------------------------------------------------
+    match /profiles/{userId} {
+      allow read, write: if signedIn() && uid() == userId;
+    }
+
+    // -------------------------------------------------------------------------
+    // BARANG
+    // -------------------------------------------------------------------------
+    match /items/{itemId} {
+      allow read: if signedIn();
+
+      // Field alamat lengkap/koordinat tidak termasuk daftar ini, sehingga
+      // tidak mungkin tersimpan di dokumen publik.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+             'title', 'category', 'description', 'imageBase64', 'donorId',
+             'ownerName', 'kelurahan', 'kota', 'status', 'createdAt'])
+        && request.resource.data.donorId == uid()
+        && request.resource.data.status == 'available'
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.category is string
+        && request.resource.data.description is string
+        && request.resource.data.ownerName is string
+        && request.resource.data.kelurahan is string
+        && request.resource.data.kota is string
+        && request.resource.data.imageBase64 is string
+        && request.resource.data.imageBase64.size() < 900000
+        && request.resource.data.createdAt == request.time;
+
+      // Pemilik hanya boleh mengubah status.
+      allow update: if signedIn()
+        && resource.data.donorId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'updatedAt'])
+        && request.resource.data.status in ['available', 'reserved', 'completed'];
+
+      allow delete: if signedIn() && resource.data.donorId == uid();
+
+      // Alamat lengkap barang.
+      match /private/{docId} {
+        allow read: if signedIn()
+          && (get(itemPath(itemId)).data.donorId == uid()
+              || isAcceptedRequester(itemId));
+
+        // getAfter: dokumen ini ditulis dalam batch yang sama dengan
+        // pembuatan item, jadi kepemilikan dicek pada keadaan setelah batch.
+        allow create, update: if signedIn()
+          && docId == 'location'
+          && getAfter(itemPath(itemId)).data.donorId == uid()
+          && request.resource.data.keys().hasOnly(['address', 'latitude', 'longitude'])
+          && request.resource.data.address is string;
+
+        // get (bukan getAfter): item dihapus dalam batch yang sama.
+        allow delete: if signedIn() && get(itemPath(itemId)).data.donorId == uid();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // PENGAJUAN PENGAMBILAN — ID dokumen: {itemId}_{requesterId}
+    // -------------------------------------------------------------------------
+    match /pickupRequests/{requestId} {
+      // resource == null: peminta boleh mengecek apakah ia sudah mengajukan.
+      allow get: if signedIn()
+        && (resource == null
+            || uid() == resource.data.requesterId
+            || uid() == resource.data.ownerId);
+
+      // Query wajib memfilter requesterId == uid atau ownerId == uid.
+      allow list: if signedIn()
+        && (uid() == resource.data.requesterId || uid() == resource.data.ownerId);
+
+      allow create: if signedIn()
+        && requestId == request.resource.data.itemId + '_' + uid()
+        && request.resource.data.keys().hasOnly([
+             'itemId', 'ownerId', 'requesterId', 'requesterName', 'method',
+             'status', 'createdAt'])
+        && request.resource.data.requesterId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.ownerId != uid()
+        && request.resource.data.ownerId
+             == get(itemPath(request.resource.data.itemId)).data.donorId
+        && get(itemPath(request.resource.data.itemId)).data.status == 'available'
+        && request.resource.data.createdAt == request.time;
+
+      // Pemilik memutuskan pengajuan yang masih pending. Menerima pengajuan
+      // hanya sah bila barang masih tersedia dan diubah menjadi reserved
+      // dalam batch yang sama (mencegah dua pengajuan sama-sama diterima).
+      allow update: if signedIn()
+        && uid() == resource.data.ownerId
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'decidedAt'])
+        && (request.resource.data.status == 'rejected'
+            || (request.resource.data.status == 'accepted'
+                && get(itemPath(resource.data.itemId)).data.status == 'available'
+                && getAfter(itemPath(resource.data.itemId)).data.status == 'reserved'));
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // NOTIFIKASI
+    // -------------------------------------------------------------------------
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.recipientId == uid();
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+             'recipientId', 'senderName', 'title', 'body', 'itemId', 'isRead',
+             'createdAt'])
+        && request.resource.data.isRead == false
+        && request.resource.data.recipientId is string
+        && request.resource.data.itemId is string
+        && (
+             // Peminta memberi tahu pemilik saat mengajukan.
+             (request.resource.data.recipientId
+                  == get(itemPath(request.resource.data.itemId)).data.donorId
+              && existsAfter(requestPath(request.resource.data.itemId, uid())))
+             ||
+             // Pemilik memberi tahu peminta tentang keputusannya.
+             (get(itemPath(request.resource.data.itemId)).data.donorId == uid()
+              && exists(requestPath(request.resource.data.itemId,
+                                    request.resource.data.recipientId)))
+           );
+
+      allow update: if signedIn()
+        && resource.data.recipientId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+
+      allow delete: if false;
+    }
+  }
+}

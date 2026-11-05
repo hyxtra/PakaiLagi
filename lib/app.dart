@@ -22,6 +22,14 @@ class PakaiLagiApp extends ConsumerWidget {
       darkTheme: AppTheme.dark,
       themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       routerConfig: router,
+      // Keyboard-safe: mengetuk area kosong menutup keyboard di semua layar.
+      // Tombol, kartu, dan field tetap menerima ketukannya sendiri karena
+      // recognizer terdalam menang di gesture arena.
+      builder: (context, child) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: child,
+      ),
     );
   }
 }

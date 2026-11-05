@@ -25,12 +25,30 @@ class AuthNotifier extends StateNotifier<AppUser?> {
 
   void signOut() => state = null;
 
-  void updateUser(
-      {String? name, String? email, String? phone, String? address}) {
+  void updateUser({
+    String? name,
+    String? email,
+    String? phone,
+    String? address,
+    String? kelurahan,
+    String? kota,
+    double? latitude,
+    double? longitude,
+    bool clearCoordinates = false,
+  }) {
     final current = state;
     if (current == null) return;
     state = current.copyWith(
-        name: name, email: email, phone: phone, address: address);
+      name: name,
+      email: email,
+      phone: phone,
+      address: address,
+      kelurahan: kelurahan,
+      kota: kota,
+      latitude: latitude,
+      longitude: longitude,
+      clearCoordinates: clearCoordinates,
+    );
   }
 
   static String _prettify(String raw) {

@@ -8,6 +8,7 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/items_provider.dart';
 import '../theme/app_palette.dart';
+import '../widgets/accessible_tap.dart';
 import '../widgets/photo_placeholder.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -38,7 +39,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final item = ref.read(itemByIdProvider(widget.itemId));
       final user = ref.read(authProvider);
-      final requesterIsMe = item == null || user == null ? true : item.ownerId != user.id;
+      final requesterIsMe =
+          item == null || user == null ? true : item.ownerId != user.id;
       ref.read(chatProvider.notifier).ensureThread(
             itemId: widget.itemId,
             itemTitle: item?.title ?? 'Barang',
@@ -71,7 +73,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final item = ref.watch(itemByIdProvider(widget.itemId));
-    final messages = ref.watch(chatProvider)[widget.itemId] ?? const <ChatMessage>[];
+    final messages =
+        ref.watch(chatProvider)[widget.itemId] ?? const <ChatMessage>[];
 
     return Scaffold(
       backgroundColor: p.bg,
@@ -81,14 +84,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+            tooltip: 'Kembali',
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.pop()),
         titleSpacing: 0,
         title: Row(
           children: [
             CircleAvatar(
               radius: 18,
               backgroundColor: p.surfaceAlt,
-              child: const Text('👤', style: TextStyle(fontSize: 16)),
+              child: const ExcludeSemantics(
+                  child: Text('👤', style: TextStyle(fontSize: 16))),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -99,8 +105,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Text(widget.peerName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-                  Text('Online', style: TextStyle(fontSize: 11.5, color: p.primary)),
+                      style: const TextStyle(
+                          fontSize: 15.5, fontWeight: FontWeight.w800)),
+                  Text('Online',
+                      style: TextStyle(fontSize: 11.5, color: p.primary)),
                 ],
               ),
             ),
@@ -113,6 +121,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           Expanded(
             child: ListView.builder(
               controller: _scroll,
+              // Men-scroll riwayat chat menutup keyboard.
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               itemCount: messages.length,
               itemBuilder: (_, i) {
@@ -140,14 +150,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         decoration: BoxDecoration(
           color: p.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: p.primary.withValues(alpha: 0.5), width: 1.4),
+          border:
+              Border.all(color: p.primary.withValues(alpha: 0.5), width: 1.4),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('BARANG YANG DIMINTA',
                 style: TextStyle(
-                    fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 0.6, color: p.primary)),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.6,
+                    color: p.primary)),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -168,7 +182,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       Text(item?.title ?? 'Barang',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: p.text)),
+                          style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              color: p.text)),
                       const SizedBox(height: 2),
                       Text(item?.category ?? '-',
                           style: TextStyle(fontSize: 12, color: p.textMuted)),
@@ -188,34 +205,43 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final mine = m.fromMe;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        constraints: const BoxConstraints(maxWidth: 260),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: mine ? p.bubbleMine : p.bubbleTheirs,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(mine ? 16 : 4),
-            bottomRight: Radius.circular(mine ? 4 : 16),
+      // Satu fokus per pesan: "Kamu, pukul 09:41: Halo…".
+      child: Semantics(
+        label: '${mine ? 'Kamu' : widget.peerName}, pukul ${m.time}: '
+            '${m.text ?? ''}',
+        excludeSemantics: true,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          constraints: const BoxConstraints(maxWidth: 260),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: mine ? p.bubbleMine : p.bubbleTheirs,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(mine ? 16 : 4),
+              bottomRight: Radius.circular(mine ? 4 : 16),
+            ),
+            border: mine ? null : Border.all(color: p.border),
           ),
-          border: mine ? null : Border.all(color: p.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(m.text ?? '',
-                style: TextStyle(
-                    fontSize: 14.5,
-                    height: 1.4,
-                    color: mine ? Colors.white : p.text)),
-            const SizedBox(height: 3),
-            Text(m.time,
-                style: TextStyle(
-                    fontSize: 10.5,
-                    color: mine ? Colors.white70 : p.textMuted)),
-          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(m.text ?? '',
+                  style: TextStyle(
+                      fontSize: 14.5,
+                      height: 1.4,
+                      color: mine ? Colors.white : p.text)),
+              const SizedBox(height: 3),
+              Text(m.time,
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      // 85% putih: kontras 5,08:1 (white70 hanya 4,03:1).
+                      color: mine
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : p.textMuted)),
+            ],
+          ),
         ),
       ),
     );
@@ -224,15 +250,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget _quickRepliesBar() {
     final p = context.palette;
     return SizedBox(
-      height: 42,
+      // Baris lebih tinggi agar tiap chip punya area sentuh 48 dp; tampilan
+      // chip tetap 34 dp seperti sebelumnya.
+      height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
         itemCount: _quickReplies.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) => GestureDetector(
+        itemBuilder: (_, i) => AccessibleTap(
           onTap: () => _send(_quickReplies[i]),
+          label: 'Kirim balasan cepat: ${_quickReplies[i]}',
+          borderRadius: BorderRadius.circular(20),
           child: Container(
+            height: 34,
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
@@ -241,7 +272,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               border: Border.all(color: p.border),
             ),
             child: Text(_quickReplies[i],
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text)),
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: p.text)),
           ),
         ),
       ),
@@ -266,12 +300,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 style: TextStyle(color: p.text),
                 textInputAction: TextInputAction.send,
                 onSubmitted: _send,
+                // Keyboard tetap terbuka setelah kirim, agar bisa langsung
+                // mengetik pesan berikutnya.
+                onEditingComplete: () {},
                 decoration: InputDecoration(
                   hintText: 'Tulis pesan…',
                   hintStyle: TextStyle(color: p.textMuted),
                   filled: true,
                   fillColor: p.surfaceAlt,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,
@@ -280,14 +318,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            Material(
-              color: p.primary,
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
+            Tooltip(
+              message: 'Kirim pesan',
+              excludeFromSemantics: true,
+              child: Semantics(
+                button: true,
+                label: 'Kirim pesan',
+                excludeSemantics: true,
                 onTap: () => _send(_composer.text),
-                child: const SizedBox(
-                    width: 46, height: 46, child: Icon(Icons.send, color: Colors.white, size: 20)),
+                child: Material(
+                  color: p.primary,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _send(_composer.text),
+                    // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
+                    child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Icon(Icons.send, color: p.onPrimary, size: 20)),
+                  ),
+                ),
               ),
             ),
           ],

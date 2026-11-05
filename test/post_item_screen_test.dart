@@ -40,6 +40,9 @@ Widget _buildTestAppWithState(PostItemState initialState) {
       cloudItemNotifierProvider.overrideWith(
         (ref) => _StubCloudItemNotifier(),
       ),
+      // Alamat penjemputan dibaca dari profil cloud; tanpa override provider
+      // ini akan mengakses FirebaseAuth yang tidak diinisialisasi di test.
+      cloudProfileProvider.overrideWith((ref) => Stream.value(null)),
     ],
     child: MaterialApp(
       theme: ThemeData(extensions: const [AppPalette.light]),
@@ -157,7 +160,10 @@ void main() {
     );
     expect(find.text('Deskripsi'), findsOneWidget);
     expect(find.text('Metode Pengambilan'), findsOneWidget);
-    expect(find.textContaining('Ambil Sendiri'), findsOneWidget);
+    expect(find.textContaining('Antar ke Alamat'), findsOneWidget);
+    expect(find.textContaining('Bertemu (COD)'), findsOneWidget);
+    // Ambil Sendiri sudah dihapus dari pilihan metode.
+    expect(find.textContaining('Ambil Sendiri'), findsNothing);
 
     await tester.dragUntilVisible(
       find.text('Alamat Penjemputan'),

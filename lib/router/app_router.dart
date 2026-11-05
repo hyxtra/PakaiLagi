@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../providers/auth_provider.dart';
 import '../screens/activity_screen.dart';
+import '../screens/location_picker_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/item_detail_screen.dart';
@@ -27,6 +29,10 @@ abstract class AppRoutes {
   static String itemDetail(String id) => '/item/$id';
   static String manageRequest(String id) => '/manage-request/$id';
   static const publicFeed = '/public-feed';
+
+  /// Pinpoint peta. `extra` opsional: [LatLng] titik awal.
+  /// Hasil `context.push<PickedLocation>(...)` berisi titik yang dipilih.
+  static const pickLocation = '/pick-location';
   static String chat(String itemId, String peerName) =>
       '/chat/$itemId?peer=${Uri.encodeComponent(peerName)}';
 }
@@ -109,6 +115,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootKey,
         path: AppRoutes.notifications,
         builder: (_, __) => const NotificationsScreen(),
+      ),
+
+      GoRoute(
+        parentNavigatorKey: _rootKey,
+        path: AppRoutes.pickLocation,
+        builder: (_, state) {
+          final initial = state.extra is LatLng ? state.extra as LatLng : null;
+          return LocationPickerScreen(
+            initialLatitude: initial?.latitude,
+            initialLongitude: initial?.longitude,
+          );
+        },
       ),
 
       // Route full-screen: Katalog Online (Firestore)

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,8 +25,9 @@ class NotificationsScreen extends ConsumerWidget {
         surfaceTintColor: Colors.transparent,
       ),
       body: notifications.when(
-        loading: () =>
-            Center(child: CircularProgressIndicator(color: p.primary)),
+        loading: () => Center(
+            child: CircularProgressIndicator(
+                color: p.primary, semanticsLabel: 'Memuat notifikasi')),
         error: (_, __) => Center(
           child: Text('Gagal memuat notifikasi.',
               style: TextStyle(color: p.textMuted)),
@@ -61,19 +64,27 @@ class NotificationsScreen extends ConsumerWidget {
                       style: TextStyle(color: p.textMuted)),
                   trailing: item.isRead
                       ? null
-                      : Container(
-                          width: 9,
-                          height: 9,
-                          decoration: BoxDecoration(
-                              color: p.primary, shape: BoxShape.circle),
+                      : Semantics(
+                          label: 'Belum dibaca',
+                          child: Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                                color: p.primary, shape: BoxShape.circle),
+                          ),
                         ),
-                  onTap: () async {
+                  onTap: () {
+                    // Pindah halaman langsung; tanda "sudah dibaca" dikirim
+                    // di belakang. Sebelumnya aplikasi menunggu server dulu,
+                    // sehingga ketukan terasa tidak merespons (dan macet saat
+                    // offline). Cache Firestore langsung menghapus titik.
                     if (!item.isRead) {
-                      await ref
+                      unawaited(ref
                           .read(firebaseRepositoryProvider)
-                          .markNotificationAsRead(item.id);
+                          .markNotificationAsRead(item.id)
+                          .then<void>((_) {}, onError: (Object _) {}));
                     }
-                    if (context.mounted && item.itemId.isNotEmpty) {
+                    if (item.itemId.isNotEmpty) {
                       context.push(AppRoutes.itemDetail(item.itemId));
                     }
                   },

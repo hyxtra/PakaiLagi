@@ -39,6 +39,20 @@ class FirebaseAuthService {
     }
   }
 
+  /// Memastikan ada sesi Firebase sebelum mengakses Firestore.
+  ///
+  /// Menunggu event pertama [authStateChanges] agar sesi tersimpan sempat
+  /// dipulihkan (di Web `currentUser` masih null sesaat setelah start).
+  /// Tanpa penantian ini, aplikasi bisa membuat akun anonim baru dan
+  /// kehilangan kepemilikan barang yang sudah diposting.
+  Future<User> ensureSignedIn() async {
+    final restored = _auth.currentUser ?? await _auth.authStateChanges().first;
+    if (restored != null) return restored;
+    final user = await signInAnonymously();
+    if (user == null) throw Exception('Gagal terhubung ke akun Firebase.');
+    return user;
+  }
+
   // ---------------------------------------------------------------------------
   // SIGN OUT
   // ---------------------------------------------------------------------------

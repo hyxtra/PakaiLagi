@@ -24,6 +24,16 @@ class PhotoPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Pembaca layar membacakan "Foto <judul>", bukan emoji kategori.
+    return Semantics(
+      image: true,
+      label: 'Foto barang: ${item.title}',
+      excludeSemantics: true,
+      child: _content(),
+    );
+  }
+
+  Widget _content() {
     // Item Firestore menyimpan foto sebagai Base64. Tangani sebelum URL/path
     // agar string Base64 tidak diteruskan ke Image.network.
     if (item.imageUrl != null && item.imageUrl!.startsWith('base64:')) {

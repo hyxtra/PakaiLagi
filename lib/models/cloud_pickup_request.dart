@@ -25,7 +25,7 @@ class CloudPickupRequest {
       itemId: data['itemId'] as String? ?? '',
       requesterId: data['requesterId'] as String? ?? '',
       requesterName: data['requesterName'] as String? ?? 'Pengguna',
-      method: data['method'] as String? ?? 'Ambil Sendiri',
+      method: data['method'] as String? ?? 'Tidak dicantumkan',
       status: data['status'] as String? ?? 'pending',
     );
   }

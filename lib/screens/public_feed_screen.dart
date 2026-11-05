@@ -51,7 +51,9 @@ class _PublicFeedScreenState extends ConsumerState<PublicFeedScreen> {
 
     setState(() => _isSigningIn = true);
     try {
-      await authService.signInAnonymously();
+      // ensureSignedIn menunggu sesi lama dipulihkan sebelum membuat akun
+      // anonim baru, sehingga kepemilikan barang tidak hilang.
+      await authService.ensureSignedIn();
     } catch (_) {
       // Error ditangani lewat UI
     } finally {

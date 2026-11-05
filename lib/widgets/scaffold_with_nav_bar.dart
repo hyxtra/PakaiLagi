@@ -69,6 +69,17 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = active ? p.primary : p.textMuted;
+    return Semantics(
+      button: true,
+      selected: active,
+      label: 'Tab $label',
+      excludeSemantics: true,
+      onTap: onTap,
+      child: _content(color, p),
+    );
+  }
+
+  Widget _content(Color color, AppPalette p) {
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -88,7 +99,8 @@ class _NavItem extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: color),
             ),
           ],
         ),

@@ -48,7 +48,7 @@ Semua entitas berada di dalam database PostgreSQL Supabase (tidak berubah dari d
    *   `ItemId` (UUID, FK -> Item.Id)
    *   `RequesterId` (UUID, FK -> Profile.Id)
    *   `Status` (Enum: `PENDING`, `ACCEPTED`, `REJECTED`)
-   *   `DeliveryMethod` (Enum: `AMBIL_LANGSUNG`, `BERTEMU`, `KURIR`)
+   *   `DeliveryMethod` (Enum: `ANTAR_ALAMAT`, `BERTEMU_COD`)
    *   `CreatedAt` (Timestamp)
 
 ## Database Rules & Security (Supabase RLS)

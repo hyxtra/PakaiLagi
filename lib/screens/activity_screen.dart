@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/pickup_methods.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/cloud_item_provider.dart';
 import '../router/app_router.dart';
 import '../theme/app_palette.dart';
+import '../widgets/accessible_tap.dart';
 import '../widgets/item_card.dart';
 
 class ActivityScreen extends ConsumerStatefulWidget {
@@ -33,9 +35,14 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Text('Aktivitas',
-                style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w700, color: p.text)),
+            child: Semantics(
+              header: true,
+              child: Text('Aktivitas',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: p.text)),
+            ),
           ),
           const SizedBox(height: 16),
           Padding(
@@ -64,7 +71,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   ) {
     final p = context.palette;
     if (requestIds.isLoading || cloudItems.isLoading) {
-      return Center(child: CircularProgressIndicator(color: p.primary));
+      return Center(
+          child: CircularProgressIndicator(
+              color: p.primary, semanticsLabel: 'Memuat pengajuan kamu'));
     }
     if (requestIds.hasError || cloudItems.hasError) {
       return Center(
@@ -85,7 +94,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
   Widget _myCloudItems(AsyncValue<List<ItemModel>> state) {
     final p = context.palette;
     return state.when(
-      loading: () => Center(child: CircularProgressIndicator(color: p.primary)),
+      loading: () => Center(
+          child: CircularProgressIndicator(
+              color: p.primary, semanticsLabel: 'Memuat barang kamu')),
       error: (_, __) => Center(
         child: Text('Gagal memuat barang kamu.',
             style: TextStyle(color: p.textMuted)),
@@ -112,8 +123,8 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                 ? ItemStatus.reserved
                 : ItemStatus.available,
         swatch: const Color(0xFF2F6B4F),
-        pickupMethods: const ['Ambil Sendiri'],
-        address: data.address,
+        pickupMethods: kPickupMethodNames,
+        address: data.areaLabel,
         imageUrl:
             data.imageBase64.isEmpty ? null : 'base64:${data.imageBase64}',
       );
@@ -122,8 +133,11 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
     final p = context.palette;
     final active = _tab == index;
     return Expanded(
-      child: GestureDetector(
+      child: AccessibleTap(
         onTap: () => setState(() => _tab = index),
+        label: 'Tab $label',
+        selected: active,
+        radio: true,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
@@ -189,7 +203,8 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
       padding: const EdgeInsets.only(bottom: 14),
       child: SizedBox(
         width: double.infinity,
-        height: 46,
+        // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
+        height: 48,
         child: OutlinedButton.icon(
           onPressed: () => context.push(AppRoutes.manageRequest(item.id)),
           style: OutlinedButton.styleFrom(
@@ -203,6 +218,10 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
             pending == 0
                 ? 'Kelola Pengajuan'
                 : 'Kelola Pengajuan ($pending baru)',
+            // Pembaca layar perlu tahu tombol ini untuk barang yang mana.
+            semanticsLabel: pending == 0
+                ? 'Kelola pengajuan untuk ${item.title}'
+                : 'Kelola pengajuan untuk ${item.title}, $pending pengajuan baru',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           ),
         ),

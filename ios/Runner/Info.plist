@@ -70,5 +70,7 @@
 	<string>PakaiLagi membutuhkan akses galeri foto untuk mengunggah foto barang.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>PakaiLagi membutuhkan akses kamera untuk memotret barang yang akan didonasikan.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PakaiLagi membutuhkan lokasi saat ini untuk mengisi alamat penjemputan barang.</string>
 </dict>
 </plist>
