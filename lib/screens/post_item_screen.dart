@@ -15,7 +15,9 @@ import '../providers/cloud_item_provider.dart';
 import '../router/app_router.dart';
 import '../services/user_messages.dart';
 import '../theme/app_palette.dart';
+import '../validators/item_validator.dart';
 import '../widgets/accessible_tap.dart';
+import '../widgets/form_field_widget.dart';
 import '../widgets/progress_dialog.dart';
 
 // =============================================================================
@@ -147,21 +149,30 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ---------------------------------------------------------------------------
 
   /// Validasi semua field. Return true jika valid, false jika ada error.
+  ///
+  /// Aturan validasi terpusat di [ItemValidator] (Separation of Concerns / DRY).
   bool _validateForm() {
     final errors = <String, String>{};
 
-    if (_titleCtrl.text.trim().isEmpty) {
-      errors['title'] = 'Judul wajib diisi';
-    }
-    if (_selectedCategory == null) {
-      errors['category'] = 'Pilih kategori barang dulu ya';
-    }
-    if (_descCtrl.text.trim().isEmpty) {
+    // ── Gunakan ItemValidator sebagai sumber kebenaran ──
+    final titleErr = ItemValidator.validateTitle(_titleCtrl.text);
+    if (titleErr != null) errors['title'] = titleErr;
+
+    final categoryErr = ItemValidator.validateCategory(_selectedCategory);
+    if (categoryErr != null) errors['category'] = categoryErr;
+
+    // Deskripsi wajib diisi (bukan hanya 5 karakter) — pesan lebih jelas
+    final descValue = _descCtrl.text.trim();
+    if (descValue.isEmpty) {
       errors['desc'] = 'Deskripsi wajib diisi';
+    } else {
+      final descErr = ItemValidator.validateDescription(descValue);
+      if (descErr != null) errors['desc'] = descErr;
     }
-    if (_selectedMethods.isEmpty) {
-      errors['methods'] = 'Pilih minimal satu metode pengambilan';
-    }
+
+    final methodsErr = ItemValidator.validatePickupMethods(_selectedMethods);
+    if (methodsErr != null) errors['methods'] = methodsErr;
+
     if (_profile()?.hasPickupAddress != true) {
       errors['addr'] =
           'Lengkapi alamat pengambilan di menu Profil terlebih dahulu';
@@ -561,13 +572,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
           ),
         ),
         if (_validationErrors['image'] != null)
-          _errorText(p, _validationErrors['image']!),
+          AppErrorText(_validationErrors['image']!),
 
         const SizedBox(height: 20),
 
         // ── Field: Judul Barang ──
-        _labeledTextField(
-          p,
+        AppLabeledField(
           label: 'Judul Barang',
           sectionKey: _sectionKeys['title'],
           controller: _titleCtrl,
@@ -586,7 +596,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         _label(p, 'Kategori', sectionKey: _sectionKeys['category']),
         // ── KONDISI 5: Error validasi untuk kategori ──
         if (_validationErrors['category'] != null)
-          _errorText(p, _validationErrors['category']!),
+          AppErrorText(_validationErrors['category']!),
         const SizedBox(height: 4),
         Wrap(
           spacing: 8,
@@ -613,8 +623,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         const SizedBox(height: 20),
 
         // ── Field: Deskripsi ──
-        _labeledTextField(
-          p,
+        AppLabeledField(
           label: 'Deskripsi',
           sectionKey: _sectionKeys['desc'],
           controller: _descCtrl,
@@ -631,7 +640,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         // ── Field: Metode Pengambilan (multi-select chip) ──
         _label(p, 'Metode Pengambilan', sectionKey: _sectionKeys['methods']),
         if (_validationErrors['methods'] != null)
-          _errorText(p, _validationErrors['methods']!),
+          AppErrorText(_validationErrors['methods']!),
         const SizedBox(height: 4),
         Wrap(
           spacing: 8,
@@ -666,7 +675,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         // ke pemilik; pengguna lain hanya melihat kelurahan & kota.
         _pickupAddressCard(p, profile, isSubmitting),
         if (_validationErrors['addr'] != null)
-          _errorText(p, _validationErrors['addr']!),
+          AppErrorText(_validationErrors['addr']!),
 
         const SizedBox(height: 28),
 
@@ -805,118 +814,6 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  /// ── KONDISI 5: Text error merah di bawah field ──
-  /// liveRegion: pembaca layar langsung membacakan pesan saat muncul.
-  Widget _errorText(AppPalette p, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, left: 2, bottom: 4),
-      child: Semantics(
-        liveRegion: true,
-        child: Text(
-          text,
-          style: TextStyle(fontSize: 12, color: p.danger),
-        ),
-      ),
-    );
-  }
-
-  /// Label + field + pesan error digabung menjadi satu node aksesibilitas,
-  /// sehingga TalkBack membacakan "Judul Barang, <error>, kotak edit" dan
-  /// bukan hanya teks contoh (hint).
-  Widget _labeledTextField(
-    AppPalette p, {
-    required String label,
-    Key? sectionKey,
-    required TextEditingController controller,
-    required String hint,
-    FocusNode? focusNode,
-    String? error,
-    int maxLines = 1,
-    bool enabled = true,
-    TextInputAction? textInputAction,
-    ValueChanged<String>? onSubmitted,
-    TextCapitalization textCapitalization = TextCapitalization.none,
-  }) {
-    return MergeSemantics(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _label(p, label, sectionKey: sectionKey),
-          _textField(
-            p,
-            controller: controller,
-            hint: hint,
-            focusNode: focusNode,
-            error: error,
-            maxLines: maxLines,
-            enabled: enabled,
-            textInputAction: textInputAction,
-            onSubmitted: onSubmitted,
-            textCapitalization: textCapitalization,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _textField(
-    AppPalette p, {
-    required TextEditingController controller,
-    required String hint,
-    FocusNode? focusNode,
-    String? error,
-    int maxLines = 1,
-    bool enabled = true,
-    TextInputAction? textInputAction,
-    ValueChanged<String>? onSubmitted,
-    TextCapitalization textCapitalization = TextCapitalization.none,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: controller,
-          focusNode: focusNode,
-          maxLines: maxLines,
-          enabled: enabled,
-          textInputAction: textInputAction,
-          onSubmitted: onSubmitted,
-          textCapitalization: textCapitalization,
-          // Ruang ekstra di bawah field yang difokuskan, agar pesan error di
-          // bawahnya tetap terlihat di atas keyboard.
-          scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
-          style: TextStyle(color: p.text),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: p.textMuted),
-            filled: true,
-            fillColor: enabled ? p.surface : p.surface.withValues(alpha: 0.6),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              // ── KONDISI 5: Border merah jika ada error ──
-              borderSide:
-                  BorderSide(color: error != null ? p.danger : p.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(
-                color: error != null ? p.danger : p.primary,
-                width: 1.6,
-              ),
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: p.border),
-            ),
-          ),
-        ),
-        if (error != null) _errorText(p, error),
-      ],
     );
   }
 
