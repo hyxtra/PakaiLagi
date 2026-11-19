@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/pickup_methods.dart';
 import '../models/cloud_pickup_request.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
@@ -92,7 +91,7 @@ class ManageRequestScreen extends ConsumerWidget {
                 ? ItemStatus.reserved
                 : ItemStatus.available,
         swatch: const Color(0xFF2F6B4F),
-        pickupMethods: kPickupMethodNames,
+        pickupMethods: item.availablePickupMethods,
         address: item.areaLabel,
         imageUrl:
             item.imageBase64.isEmpty ? null : 'base64:${item.imageBase64}',

@@ -62,15 +62,18 @@ abstract final class LocationService {
     }
   }
 
-  /// Alamat untuk koordinat. Null bila tidak didukung platform, gagal, atau
-  /// tidak ada hasil (pemanggil meminta pengguna mengisi alamat manual).
+  /// Alamat untuk koordinat. Null bila reverse geocoding tidak didukung
+  /// platform; bila layanan gagal di Android/iOS, alamat berisi fallback
+  /// koordinat agar titik tetap dapat disimpan.
   static Future<AddressParts?> reverseGeocode(
       double latitude, double longitude) async {
     if (!reverseGeocodingSupported) return null;
     try {
       final placemarks = await placemarkFromCoordinates(latitude, longitude)
           .timeout(_geocodeTimeout);
-      if (placemarks.isEmpty) return null;
+      if (placemarks.isEmpty) {
+        return _coordinateFallback(latitude, longitude);
+      }
       final place = placemarks.first;
       final parts = AddressPrivacy.fromPlacemark(
         street: place.street,
@@ -80,11 +83,22 @@ abstract final class LocationService {
         administrativeArea: place.administrativeArea,
         postalCode: place.postalCode,
       );
-      return parts.fullAddress.isEmpty ? null : parts;
+      return parts.fullAddress.isEmpty
+          ? _coordinateFallback(latitude, longitude)
+          : parts;
     } catch (_) {
-      return null;
+      // Simpan titik GPS meski layanan geocoding offline atau timeout.
+      return _coordinateFallback(latitude, longitude);
     }
   }
+
+  static AddressParts _coordinateFallback(double latitude, double longitude) =>
+      (
+        fullAddress:
+            'Koordinat: ${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}',
+        kelurahan: '',
+        kota: '',
+      );
 
   /// URL Google Maps (Maps URLs API, tanpa API key). Di Android/iOS tautan
   /// ini dibuka oleh aplikasi Google Maps bila terpasang.

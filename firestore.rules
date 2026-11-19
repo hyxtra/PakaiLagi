@@ -58,7 +58,14 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
              'title', 'category', 'description', 'imageBase64', 'donorId',
-             'ownerName', 'kelurahan', 'kota', 'status', 'createdAt'])
+             'ownerName', 'kelurahan', 'kota', 'pickupMethods', 'status',
+             'createdAt'])
+        // pickupMethods opsional (barang lama tidak punya). Bila ada: daftar
+        // berisi 1–5 nama metode berupa teks.
+        && (!('pickupMethods' in request.resource.data)
+            || (request.resource.data.pickupMethods is list
+                && request.resource.data.pickupMethods.size() >= 1
+                && request.resource.data.pickupMethods.size() <= 5))
         && request.resource.data.donorId == uid()
         && request.resource.data.status == 'available'
         && request.resource.data.title is string

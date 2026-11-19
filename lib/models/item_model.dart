@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../business/address_privacy.dart';
 import '../business/image_base64.dart';
+import '../data/pickup_methods.dart';
 
 // =============================================================================
 // FILE 1: item_model.dart
@@ -22,6 +23,7 @@ class ItemModel {
     required this.description,
     this.kelurahan = '',
     this.kota = '',
+    this.pickupMethods = const [],
     this.imageBase64 = '',
     this.donorId = '',
     this.ownerName = 'Pengguna',
@@ -35,11 +37,20 @@ class ItemModel {
   final String description;
   final String kelurahan;
   final String kota;
+
+  /// Metode pengambilan yang dipilih pemberi. Kosong untuk barang lama yang
+  /// diposting sebelum metode disimpan; gunakan [availablePickupMethods].
+  final List<String> pickupMethods;
   final String imageBase64;
   final String donorId;
   final String ownerName;
   final String status;
   final DateTime? createdAt;
+
+  /// Metode yang boleh dipilih peminta. Barang lama (tanpa data metode)
+  /// menawarkan semua metode, seperti perilaku sebelum metode disimpan.
+  List<String> get availablePickupMethods =>
+      pickupMethods.isEmpty ? kPickupMethodNames : pickupMethods;
 
   /// Lokasi yang boleh dilihat publik, mis. "Kel. Melati, Jakarta Selatan".
   String get areaLabel =>
@@ -64,6 +75,7 @@ class ItemModel {
       description: data['description'] as String? ?? '',
       kelurahan: data['kelurahan'] as String? ?? '',
       kota: data['kota'] as String? ?? '',
+      pickupMethods: _parsePickupMethods(data['pickupMethods']),
       imageBase64: data['imageBase64'] as String? ?? '',
       donorId: data['donorId'] as String? ?? '',
       ownerName: data['ownerName'] as String? ?? 'Pengguna',
@@ -74,6 +86,17 @@ class ItemModel {
               ? rawCreatedAt
               : null,
     );
+  }
+
+  /// Hanya nama metode yang dikenal aplikasi yang diterima; data rusak atau
+  /// bertipe salah menghasilkan daftar kosong (dianggap barang lama).
+  static List<String> _parsePickupMethods(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<String>()
+        .where(kPickupMethodNames.contains)
+        .toSet()
+        .toList(growable: false);
   }
 
   /// Bytes gambar untuk Image.memory; null untuk gambar kosong/rusak.

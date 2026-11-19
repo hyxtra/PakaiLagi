@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/pickup_methods.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/cloud_item_provider.dart';
@@ -123,7 +122,7 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
                 ? ItemStatus.reserved
                 : ItemStatus.available,
         swatch: const Color(0xFF2F6B4F),
-        pickupMethods: kPickupMethodNames,
+        pickupMethods: data.availablePickupMethods,
         address: data.areaLabel,
         imageUrl:
             data.imageBase64.isEmpty ? null : 'base64:${data.imageBase64}',

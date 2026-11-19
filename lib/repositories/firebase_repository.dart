@@ -88,9 +88,17 @@ class FirebaseRepository {
     required String fullAddress,
     required String kelurahan,
     required String kota,
+    required List<String> pickupMethods,
     double? latitude,
     double? longitude,
   }) async {
+    // Cek ukuran SEBELUM mengirim: server menolak foto yang lewat batas dengan
+    // pesan "Akses ditolak", yang menyesatkan pengguna.
+    if (!ImageBase64.fitsFirestoreLimit(imageBytes.length)) {
+      final kb = (imageBytes.length / 1024).round();
+      throw Exception('Foto terlalu besar ($kb KB). Ambil ulang foto atau '
+          'pilih foto dengan ukuran lebih kecil.');
+    }
     final donorId = (await _authService.ensureSignedIn()).uid;
     final imageBase64 = await _encodeBytesToBase64(imageBytes);
 
@@ -105,6 +113,7 @@ class FirebaseRepository {
       'ownerName': ownerName,
       'kelurahan': kelurahan,
       'kota': kota,
+      'pickupMethods': pickupMethods,
       'status': ItemStatusRules.available,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -173,9 +182,17 @@ class FirebaseRepository {
   }
 
   /// UPDATE status barang melalui Cloud Firestore.
-  Future<void> updateItemStatus(String itemId, String status) {
+  ///
+  /// Bila [from] diberikan, perubahannya harus transisi yang sah menurut
+  /// [ItemStatusRules.canTransition] (mis. reserved -> completed).
+  Future<void> updateItemStatus(String itemId, String status, {String? from}) {
     if (!ItemStatusRules.isValid(status)) {
       throw ArgumentError.value(status, 'status', 'Status item tidak valid');
+    }
+    if (from != null &&
+        !ItemStatusRules.canTransition(from: from, to: status)) {
+      throw Exception('Perubahan status dari "$from" ke "$status" tidak '
+          'diizinkan.');
     }
     return _firestore
         .collection(_itemsCollection)
@@ -291,11 +308,35 @@ class FirebaseRepository {
     final itemDoc =
         await _firestore.collection(_itemsCollection).doc(itemId).get();
     final itemData = itemDoc.data() ?? const <String, dynamic>{};
+
+    // Saat satu pengajuan diterima, barang hanya untuk satu peminta. Pengajuan
+    // lain yang masih menunggu ikut ditolak dalam batch yang sama, supaya
+    // tidak menggantung selamanya dan tombol Terima-nya tidak menyesatkan.
+    final autoRejected = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    if (accepted) {
+      final ownerId = requestData['ownerId'] as String? ?? '';
+      if (ownerId.isNotEmpty) {
+        final others = await _firestore
+            .collection(_requestsCollection)
+            .where('itemId', isEqualTo: itemId)
+            .where('ownerId', isEqualTo: ownerId)
+            .get();
+        autoRejected.addAll(others.docs.where(
+            (doc) => doc.id != requestId && doc.data()['status'] == 'pending'));
+      }
+    }
+
     final batch = _firestore.batch();
     batch.update(_firestore.collection(_requestsCollection).doc(requestId), {
       'status': accepted ? 'accepted' : 'rejected',
       'decidedAt': FieldValue.serverTimestamp(),
     });
+    for (final other in autoRejected) {
+      batch.update(other.reference, {
+        'status': 'rejected',
+        'decidedAt': FieldValue.serverTimestamp(),
+      });
+    }
     if (accepted) {
       batch.update(_firestore.collection(_itemsCollection).doc(itemId), {
         'status': ItemStatusRules.reserved,
@@ -320,6 +361,20 @@ class FirebaseRepository {
           itemId: itemId,
         ))
         .then<void>((_) {}, onError: (Object _) {}));
+
+    // Beri tahu peminta lain yang otomatis ditolak (juga tidak ditunggu).
+    for (final other in autoRejected) {
+      unawaited(_firestore
+          .collection(_notificationsCollection)
+          .add(_notificationData(
+            recipientId: other.data()['requesterId'] as String? ?? '',
+            senderName: itemData['ownerName'] as String? ?? 'Pemberi barang',
+            title: 'Pengajuan ditolak',
+            body: '"$itemTitle" sudah diberikan kepada peminta lain.',
+            itemId: itemId,
+          ))
+          .then<void>((_) {}, onError: (Object _) {}));
+    }
   }
 
   // ---------------------------------------------------------------------------

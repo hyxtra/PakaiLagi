@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../data/pickup_methods.dart';
 import '../business/item_ownership.dart';
+import '../business/item_status_rules.dart';
 import '../models/item.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_item_provider.dart';
@@ -59,7 +60,7 @@ class ItemDetailScreen extends ConsumerWidget {
                       ? ItemStatus.reserved
                       : ItemStatus.available,
               swatch: const Color(0xFF2F6B4F),
-              pickupMethods: kPickupMethodNames,
+              pickupMethods: data.availablePickupMethods,
               address: data.areaLabel,
               imageUrl:
                   data.imageBytes == null ? null : 'base64:${data.imageBase64}',
@@ -266,22 +267,50 @@ class ItemDetailScreen extends ConsumerWidget {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _confirmDelete(context, ref, item),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: p.danger,
-                      foregroundColor: p.onDanger,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Serah terima selesai: hanya untuk barang yang sudah
+                    // disetujui (reserved). Sebelumnya status Selesai tidak
+                    // pernah bisa diatur dari aplikasi.
+                    if (item.status == ItemStatus.reserved) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _confirmComplete(context, ref, item),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: p.primary,
+                            foregroundColor: p.onPrimary,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                          icon: const Icon(Icons.task_alt),
+                          label: const Text('Tandai Serah Terima Selesai',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _confirmDelete(context, ref, item),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: p.danger,
+                          foregroundColor: p.onDanger,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Hapus Barang',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
                     ),
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Hapus Barang',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
-                  ),
+                  ],
                 ),
               ),
             )
@@ -299,6 +328,52 @@ class ItemDetailScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  /// Menandai serah terima selesai (reserved -> completed), satu arah.
+  Future<void> _confirmComplete(
+      BuildContext context, WidgetRef ref, Item item) async {
+    final p = context.palette;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Serah Terima Selesai?'),
+        content:
+            Text('Tandai "${item.title}" sudah diserahkan kepada penerima. '
+                'Status berubah menjadi Selesai dan tidak bisa dikembalikan.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(foregroundColor: p.primary),
+              child: const Text('Tandai Selesai')),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final messenger = AppMessenger.of(context);
+    try {
+      final outcome = await runWithProgress(
+        context,
+        message: 'Menandai selesai…',
+        task: () =>
+            awaitWrite(ref.read(firebaseRepositoryProvider).updateItemStatus(
+                  item.id,
+                  ItemStatusRules.completed,
+                  from: ItemStatusRules.reserved,
+                )),
+      );
+      messenger.result(outcome,
+          done: 'Serah terima selesai. Terima kasih sudah berbagi!',
+          queued: 'Status selesai tersimpan di perangkat. $queuedSuffix');
+    } catch (error) {
+      showAppSnackBar(messenger,
+          friendlyError(error, fallback: 'Gagal menandai selesai. Coba lagi.'),
+          isError: true);
+    }
   }
 
   Future<void> _confirmDelete(
@@ -573,10 +648,14 @@ class ItemDetailScreen extends ConsumerWidget {
                                         strokeWidth: 2.4, color: p.onAccent),
                                   ),
                                   const SizedBox(width: 12),
-                                  const Text('Mengirim pengajuan…',
-                                      style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700)),
+                                  const Flexible(
+                                    child: Text('Mengirim pengajuan…',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700)),
+                                  ),
                                 ],
                               )
                             : const Text('Konfirmasi Pengajuan',
@@ -633,17 +712,15 @@ class _PickupLocationSection extends ConsumerWidget {
           'kepadamu.';
     } else {
       note = 'Titik penjemputan persis dibagikan setelah pengajuanmu '
-          'diterima pemberi. Tombol di bawah membuka area kelurahan saja.';
+          'diterima pemberi.';
     }
 
-    // Tujuan Google Maps sesuai hak akses: titik GPS persis → alamat lengkap
-    // → area kelurahan & kota (publik).
+    // Titik GPS hanya tersedia bagi pemilik dan peminta yang disetujui.
     final lat = fullAddress?.latitude;
     final lng = fullAddress?.longitude;
     final hasPin = lat != null && lng != null;
     final fullText = fullAddress?.address.trim() ?? '';
-    final mapsQuery = fullText.isNotEmpty ? fullText : areaLabel.trim();
-    final canOpenMaps = hasPin || mapsQuery.isNotEmpty;
+    final mapsQuery = fullText;
 
     Future<void> openMaps() async {
       final opened = await LocationService.openInGoogleMaps(
@@ -679,6 +756,8 @@ class _PickupLocationSection extends ConsumerWidget {
                     : areaLabel.isNotEmpty
                         ? areaLabel
                         : 'Lokasi belum diatur',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 14.5, height: 1.45, color: p.text),
               ),
             ),
@@ -696,7 +775,7 @@ class _PickupLocationSection extends ConsumerWidget {
         ],
         const SizedBox(height: 6),
         Text(note, style: TextStyle(fontSize: 12.5, color: p.textMuted)),
-        if (canOpenMaps) ...[
+        if (hasPin) ...[
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
@@ -712,9 +791,7 @@ class _PickupLocationSection extends ConsumerWidget {
               ),
               icon: const Icon(Icons.map_outlined, size: 19),
               label: Text(
-                hasPin
-                    ? 'Buka Titik di Google Maps'
-                    : 'Lihat Area di Google Maps',
+                'Buka Titik di Google Maps',
                 style:
                     const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),

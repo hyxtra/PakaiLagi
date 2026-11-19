@@ -1,8 +1,7 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../business/image_base64.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/cloud_item_provider.dart';
@@ -254,7 +253,8 @@ class _CloudItemCard extends StatelessWidget {
     final title = item.title.isEmpty ? 'Tanpa Judul' : item.title;
     final category = item.category;
     final description = item.description;
-    final imageBase64 = item.imageBase64;
+    // Base64 rusak => null => tampil placeholder, bukan crash saat build.
+    final photoBytes = ImageBase64.decodeOrNull(item.imageBase64);
     final status = item.status;
     final emoji = categoryEmoji(category);
 
@@ -269,12 +269,12 @@ class _CloudItemCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Gambar barang dari Base64 ──
-          if (imageBase64.isNotEmpty)
+          if (photoBytes != null)
             SizedBox(
               width: double.infinity,
               height: 180,
               child: Image.memory(
-                base64Decode(imageBase64),
+                photoBytes,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => Container(
                   color: p.surfaceAlt,

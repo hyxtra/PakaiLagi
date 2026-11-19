@@ -1,10 +1,8 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/pickup_methods.dart';
+import '../business/image_base64.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
@@ -30,6 +28,30 @@ int homeColumnsForWidth(double maxWidth) {
   return 3;
 }
 
+/// Apakah header Beranda disematkan di atas daftar (true) atau ikut menggulir
+/// bersama daftar (false).
+///
+/// Header disematkan hanya bila setelah header masih tersisa ruang daftar
+/// yang layak. Tinggi header diukur dari tampilan sebenarnya dan membesar
+/// mengikuti ukuran font perangkat; konstanta di bawah adalah hasil ukur
+/// (lihat laporan P10).
+bool homeShouldPinHeader({
+  required double availableHeight,
+  required double textScale,
+}) {
+  final headerHeight = kHomeHeaderBaseHeight * (textScale < 1 ? 1 : textScale);
+  return availableHeight >= headerHeight + kHomeMinListHeight;
+}
+
+/// Tinggi header Beranda pada font normal (dp). Terukur pada tes widget:
+/// sekitar 260 dp (font 1x), 355 dp (1,3x), 437 dp (1,6x), 526 dp (2x). Model
+/// linear 270 dp x skala font cukup dekat; selisih kecilnya ditutup oleh
+/// [kHomeMinListHeight].
+const double kHomeHeaderBaseHeight = 270;
+
+/// Tinggi minimum area daftar agar header layak disematkan (dp).
+const double kHomeMinListHeight = 150;
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -53,7 +75,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ownerPhone: '',
       status: ItemStatus.available,
       swatch: const Color(0xFF2F6B4F),
-      pickupMethods: kPickupMethodNames,
+      pickupMethods: data.availablePickupMethods,
       address: '',
       // Simpan Base64 string sebagai imageUrl, akan di-handle khusus
       imageUrl:
@@ -81,214 +103,264 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         MediaQuery.textScalerOf(context).scale(36).clamp(36.0, 80.0);
     final chipRowHeight = chipHeight < 48 ? 48.0 : chipHeight;
 
-    return SafeArea(
-      bottom: false,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    // Header (sapaan, pencarian, chip kategori) dipisah dari isi supaya bisa
+    // disematkan di atas daftar (layar cukup tinggi) atau ikut menggulir
+    // (layar pendek: HP landscape, font besar).
+    final header = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Halo, ${user?.firstName ?? 'Teman'} 👋',
+                        style: TextStyle(fontSize: 13.5, color: p.textMuted)),
+                    const SizedBox(height: 2),
+                    Text('Barang siap diberi hidup kedua',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: p.text,
+                            height: 1.25)),
+                  ],
+                ),
+              ),
+              AccessibleTap(
+                onTap: () => context.push(AppRoutes.notifications),
+                label: unreadNotifications > 0
+                    ? 'Notifikasi, $unreadNotifications belum dibaca'
+                    : 'Notifikasi',
+                tooltip: 'Notifikasi',
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Text('Halo, ${user?.firstName ?? 'Teman'} 👋',
-                          style: TextStyle(fontSize: 13.5, color: p.textMuted)),
-                      const SizedBox(height: 2),
-                      Text('Barang siap diberi hidup kedua',
-                          style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              color: p.text,
-                              height: 1.25)),
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                            color: p.surfaceAlt,
+                            borderRadius: BorderRadius.circular(14)),
+                        child: Icon(Icons.notifications_none,
+                            size: 20, color: p.primary),
+                      ),
+                      if (unreadNotifications > 0)
+                        Positioned(
+                          top: 7,
+                          right: 7,
+                          child: Container(
+                            constraints: const BoxConstraints(minWidth: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            alignment: Alignment.center,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: p.danger,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              unreadNotifications > 9
+                                  ? '9+'
+                                  : '$unreadNotifications',
+                              style: TextStyle(
+                                  color: p.onDanger,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
-                AccessibleTap(
-                  onTap: () => context.push(AppRoutes.notifications),
-                  label: unreadNotifications > 0
-                      ? 'Notifikasi, $unreadNotifications belum dibaca'
-                      : 'Notifikasi',
-                  tooltip: 'Notifikasi',
-                  borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(
-                    width: 44,
-                    height: 44,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                              color: p.surfaceAlt,
-                              borderRadius: BorderRadius.circular(14)),
-                          child: Icon(Icons.notifications_none,
-                              size: 20, color: p.primary),
-                        ),
-                        if (unreadNotifications > 0)
-                          Positioned(
-                            top: 7,
-                            right: 7,
-                            child: Container(
-                              constraints: const BoxConstraints(minWidth: 16),
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              alignment: Alignment.center,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                color: p.danger,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                unreadNotifications > 9
-                                    ? '9+'
-                                    : '$unreadNotifications',
-                                style: TextStyle(
-                                    color: p.onDanger,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                          ),
-                      ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        // Search
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: TextField(
+            onChanged: (v) => setState(() => _query = v),
+            // Tombol keyboard "Cari" menutup keyboard agar hasil terlihat.
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => FocusScope.of(context).unfocus(),
+            style: TextStyle(color: p.text),
+            decoration: InputDecoration(
+              hintText: 'Cari barang, mis. meja belajar…',
+              hintStyle: TextStyle(color: p.textMuted),
+              prefixIcon: Icon(Icons.search, color: p.textMuted, size: 18),
+              filled: true,
+              fillColor: p.surface,
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: p.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: p.border),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        // Category chips. Tinggi chip ikut membesar bila ukuran font HP
+        // diperbesar, dan area sentuh minimal 48 dp.
+        SizedBox(
+          height: chipRowHeight,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: cats.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final active = cats[i] == _cat;
+              return AccessibleTap(
+                onTap: () => setState(() => _cat = cats[i]),
+                label: 'Filter kategori ${cats[i]}',
+                selected: active,
+                radio: true,
+                borderRadius: BorderRadius.circular(30),
+                child: Container(
+                  height: chipHeight,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: active ? p.primary : p.surface,
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: active ? p.primary : p.border),
+                  ),
+                  child: Text(
+                    cats[i],
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: active ? p.onPrimary : p.textMuted,
                     ),
                   ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
+    );
+
+    // Isi di bawah header. [embedded] = true bila seluruh Beranda sedang
+    // menggulir (mode layar pendek): isi tidak boleh punya scroll sendiri.
+    Widget body({required bool embedded}) {
+      if (cloudAsync.isLoading) {
+        return _statusView(
+          embedded,
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                  color: p.primary, semanticsLabel: 'Memuat daftar barang'),
+              const SizedBox(height: 12),
+              Text('Memuat barang…', style: TextStyle(color: p.textMuted)),
+            ],
+          ),
+        );
+      }
+      if (cloudAsync.hasError) {
+        return _statusView(
+          embedded,
+          Semantics(
+            liveRegion: true,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Gagal memuat barang. Periksa koneksi kamu.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: p.textMuted)),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => ref.invalidate(cloudItemsStreamProvider),
+                  child: const Text('Coba lagi'),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 18),
-          // Search
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v),
-              // Tombol keyboard "Cari" menutup keyboard agar hasil terlihat.
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => FocusScope.of(context).unfocus(),
-              style: TextStyle(color: p.text),
-              decoration: InputDecoration(
-                hintText: 'Cari barang, mis. meja belajar…',
-                hintStyle: TextStyle(color: p.textMuted),
-                prefixIcon: Icon(Icons.search, color: p.textMuted, size: 18),
-                filled: true,
-                fillColor: p.surface,
-                contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: p.border),
+        );
+      }
+      if (filtered.isEmpty) {
+        return _statusView(
+          embedded,
+          Semantics(
+            liveRegion: true,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ExcludeSemantics(
+                  child: Text('📦', style: TextStyle(fontSize: 48)),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: p.border),
-                ),
-              ),
+                const SizedBox(height: 12),
+                Text('Belum ada barang yang cocok.',
+                    style: TextStyle(color: p.textMuted, fontSize: 14)),
+              ],
             ),
           ),
-          const SizedBox(height: 14),
-          // Category chips. Tinggi chip ikut membesar bila ukuran font HP
-          // diperbesar, dan area sentuh minimal 48 dp.
-          SizedBox(
-            height: chipRowHeight,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: cats.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final active = cats[i] == _cat;
-                return AccessibleTap(
-                  onTap: () => setState(() => _cat = cats[i]),
-                  label: 'Filter kategori ${cats[i]}',
-                  selected: active,
-                  radio: true,
-                  borderRadius: BorderRadius.circular(30),
-                  child: Container(
-                    height: chipHeight,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: active ? p.primary : p.surface,
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(color: active ? p.primary : p.border),
-                    ),
-                    child: Text(
-                      cats[i],
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: active ? p.onPrimary : p.textMuted,
-                      ),
-                    ),
-                  ),
-                );
-              },
+        );
+      }
+      return _buildItemList(filtered, p, embedded: embedded);
+    }
+
+    return SafeArea(
+      bottom: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final pinned = homeShouldPinHeader(
+            availableHeight: constraints.maxHeight,
+            textScale: MediaQuery.textScalerOf(context).scale(1),
+          );
+          if (pinned) {
+            // Tampilan HP biasa: header tetap di atas, hanya daftar yang
+            // menggulir (perilaku semula).
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                header,
+                Expanded(child: body(embedded: false)),
+              ],
+            );
+          }
+          // Layar terlalu pendek untuk header + daftar sekaligus: seluruh
+          // Beranda menggulir, sehingga tidak ada overflow dan daftar tetap
+          // bisa dijangkau.
+          return SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                header,
+                body(embedded: true),
+              ],
             ),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            // Tiga tampilan status memakai _centeredScrollable: di layar
-            // pendek (HP landscape, font besar) isinya bisa di-scroll dan
-            // tidak melimpah ke bawah.
-            child: cloudAsync.isLoading
-                ? _centeredScrollable(
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(
-                            color: p.primary,
-                            semanticsLabel: 'Memuat daftar barang'),
-                        const SizedBox(height: 12),
-                        Text('Memuat barang…',
-                            style: TextStyle(color: p.textMuted)),
-                      ],
-                    ),
-                  )
-                : cloudAsync.hasError
-                    ? _centeredScrollable(
-                        Semantics(
-                          liveRegion: true,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text('Gagal memuat barang. Periksa koneksi kamu.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: p.textMuted)),
-                              const SizedBox(height: 12),
-                              OutlinedButton(
-                                onPressed: () =>
-                                    ref.invalidate(cloudItemsStreamProvider),
-                                child: const Text('Coba lagi'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : filtered.isEmpty
-                        ? _centeredScrollable(
-                            Semantics(
-                              liveRegion: true,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const ExcludeSemantics(
-                                    child: Text('📦',
-                                        style: TextStyle(fontSize: 48)),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text('Belum ada barang yang cocok.',
-                                      style: TextStyle(
-                                          color: p.textMuted, fontSize: 14)),
-                                ],
-                              ),
-                            ),
-                          )
-                        : _buildItemList(filtered, p),
-          ),
-        ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Tampilan Memuat / Error / Kosong. Pada mode pinned dipusatkan dan bisa
+  /// di-scroll bila ruang lebih pendek dari isinya; pada mode embedded
+  /// (Beranda sudah menggulir) cukup diberi jarak.
+  Widget _statusView(bool embedded, Widget child) {
+    if (!embedded) return _centeredScrollable(child);
+    return SizedBox(
+      width: double.infinity,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Center(child: child),
       ),
     );
   }
@@ -308,7 +380,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// - maxWidth < 600  → ListView (1 kolom)
   /// - 600–899         → GridView 2 kolom
   /// - ≥ 900           → GridView 3 kolom
-  Widget _buildItemList(List<Item> items, AppPalette p) {
+  ///
+  /// [embedded] = true bila seluruh Beranda sudah menggulir (mode layar
+  /// pendek): daftar ditampilkan setinggi isinya dan tidak menggulir sendiri.
+  Widget _buildItemList(List<Item> items, AppPalette p,
+      {required bool embedded}) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = homeColumnsForWidth(constraints.maxWidth);
@@ -318,6 +394,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (columns == 1) {
           return ListView.builder(
             keyboardDismissBehavior: dismiss,
+            shrinkWrap: embedded,
+            physics: embedded ? const NeverScrollableScrollPhysics() : null,
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             itemCount: items.length,
             itemBuilder: (_, i) => _buildItemCard(items[i], p),
@@ -330,6 +408,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             MediaQuery.textScalerOf(context).scale(138).clamp(138.0, 320.0);
         return GridView.builder(
           keyboardDismissBehavior: dismiss,
+          shrinkWrap: embedded,
+          physics: embedded ? const NeverScrollableScrollPhysics() : null,
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
@@ -354,6 +434,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     if (isBase64) {
       final b64 = item.imageUrl!.substring(7); // hapus prefix "base64:"
+      // decodeOrNull: Base64 rusak tidak boleh melempar FormatException saat
+      // build (errorBuilder hanya menangkap kegagalan decode GAMBAR, bukan
+      // kegagalan decode Base64-nya).
+      final photoBytes = ImageBase64.decodeOrNull(b64);
+      Widget photoFallback() => Container(
+            color: p.primary,
+            alignment: Alignment.center,
+            child: Text(categoryEmoji(item.category),
+                style: const TextStyle(fontSize: 32)),
+          );
       return Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: AccessibleTap(
@@ -382,16 +472,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   child: SizedBox(
                     width: 92,
                     height: 92,
-                    child: Image.memory(
-                      base64Decode(b64),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: const Color(0xFF2F6B4F),
-                        alignment: Alignment.center,
-                        child: Text(categoryEmoji(item.category),
-                            style: const TextStyle(fontSize: 32)),
-                      ),
-                    ),
+                    child: photoBytes == null
+                        ? photoFallback()
+                        : Image.memory(
+                            photoBytes,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => photoFallback(),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 14),

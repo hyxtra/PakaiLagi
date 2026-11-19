@@ -157,6 +157,7 @@ class CloudItemNotifier extends StateNotifier<PublishState> {
     required Uint8List imageBytes,
     required String ownerName,
     required AppUser pickupAddress,
+    required List<String> pickupMethods,
   }) async {
     state = const PublishLoading();
 
@@ -174,6 +175,7 @@ class CloudItemNotifier extends StateNotifier<PublishState> {
           fullAddress: pickupAddress.address.trim(),
           kelurahan: pickupAddress.kelurahan.trim(),
           kota: pickupAddress.kota.trim(),
+          pickupMethods: pickupMethods,
           latitude: pickupAddress.latitude,
           longitude: pickupAddress.longitude,
         ),

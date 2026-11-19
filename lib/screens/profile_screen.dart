@@ -16,7 +16,7 @@ import '../services/user_messages.dart';
 import '../theme/app_palette.dart';
 import '../widgets/progress_dialog.dart';
 
-enum _View { menu, edit, address, help }
+enum _View { menu, edit, help }
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -36,8 +36,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         _View.menu => _menu(),
         _View.edit =>
           _EditProfileView(onBack: () => setState(() => _view = _View.menu)),
-        _View.address =>
-          _AddressView(onBack: () => setState(() => _view = _View.menu)),
         _View.help =>
           _HelpView(onBack: () => setState(() => _view = _View.menu)),
       },
@@ -172,9 +170,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               _menuTile(Icons.edit_outlined, 'Edit Profil',
                   () => setState(() => _view = _View.edit)),
               _divider(),
-              _menuTile(Icons.location_on_outlined, 'Alamat Pengambilan',
-                  () => setState(() => _view = _View.address)),
-              _divider(),
               _menuTile(Icons.help_outline, 'Bantuan & Panduan',
                   () => setState(() => _view = _View.help)),
             ],
@@ -286,13 +281,39 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
   late final TextEditingController _name;
   late final TextEditingController _email;
   late final TextEditingController _phone;
+  late final TextEditingController _address;
+  late final TextEditingController _kelurahan;
+  late final TextEditingController _kota;
+  double? _latitude;
+  double? _longitude;
+  final Map<String, String> _errors = {};
   bool _saving = false;
+
+  bool get _hasPin => _latitude != null && _longitude != null;
 
   Future<void> _save() async {
     FocusScope.of(context).unfocus();
+    final hasAddressInput = _hasPin ||
+        _address.text.trim().isNotEmpty ||
+        _kelurahan.text.trim().isNotEmpty ||
+        _kota.text.trim().isNotEmpty;
+    final errors = hasAddressInput
+        ? <String, String>{
+            if (_address.text.trim().isEmpty)
+              'address': 'Alamat lengkap wajib diisi',
+            if (_kelurahan.text.trim().isEmpty)
+              'kelurahan': 'Kelurahan/desa wajib diisi',
+            if (_kota.text.trim().isEmpty) 'kota': 'Kota/kabupaten wajib diisi',
+          }
+        : <String, String>{};
+    setState(() {
+      _errors
+        ..clear()
+        ..addAll(errors);
+    });
+    if (errors.isNotEmpty) return;
+
     final messenger = AppMessenger.of(context);
-    final current =
-        ref.read(cloudProfileProvider).valueOrNull ?? ref.read(authProvider);
     setState(() => _saving = true);
     try {
       final outcome = await awaitWrite(
@@ -300,21 +321,27 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
               name: _name.text.trim(),
               email: _email.text.trim(),
               phone: _phone.text.trim(),
-              address: current?.address ?? '',
-              kelurahan: current?.kelurahan ?? '',
-              kota: current?.kota ?? '',
-              latitude: current?.latitude,
-              longitude: current?.longitude,
+              address: _address.text.trim(),
+              kelurahan: _kelurahan.text.trim(),
+              kota: _kota.text.trim(),
+              latitude: _latitude,
+              longitude: _longitude,
             ),
       );
       ref.read(authProvider.notifier).updateUser(
             name: _name.text.trim(),
             email: _email.text.trim(),
             phone: _phone.text.trim(),
+            address: _address.text.trim(),
+            kelurahan: _kelurahan.text.trim(),
+            kota: _kota.text.trim(),
+            latitude: _latitude,
+            longitude: _longitude,
+            clearCoordinates: !_hasPin,
           );
       messenger.result(outcome,
-          done: 'Profil berhasil diperbarui',
-          queued: 'Profil tersimpan di perangkat. $queuedSuffix');
+          done: 'Profil dan alamat pengambilan berhasil disimpan',
+          queued: 'Profil dan alamat tersimpan di perangkat. $queuedSuffix');
     } catch (error) {
       showAppSnackBar(messenger,
           friendlyError(error, fallback: 'Gagal menyimpan profil. Coba lagi.'),
@@ -332,6 +359,11 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
     _name = TextEditingController(text: u?.name ?? '');
     _email = TextEditingController(text: u?.email ?? '');
     _phone = TextEditingController(text: u?.phone ?? '');
+    _address = TextEditingController(text: u?.address ?? '');
+    _kelurahan = TextEditingController(text: u?.kelurahan ?? '');
+    _kota = TextEditingController(text: u?.kota ?? '');
+    _latitude = u?.latitude;
+    _longitude = u?.longitude;
   }
 
   @override
@@ -339,92 +371,17 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
     _name.dispose();
     _email.dispose();
     _phone.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _SubScaffold(
-      title: 'Edit Profil',
-      onBack: widget.onBack,
-      children: [
-        _LabeledField(
-          label: 'Nama Lengkap',
-          controller: _name,
-          enabled: !_saving,
-          textCapitalization: TextCapitalization.words,
-          textInputAction: TextInputAction.next,
-        ),
-        _LabeledField(
-          label: 'Email',
-          controller: _email,
-          enabled: !_saving,
-          keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.next,
-        ),
-        _LabeledField(
-          label: 'Nomor HP',
-          controller: _phone,
-          enabled: !_saving,
-          keyboardType: TextInputType.phone,
-          // Field terakhir: "Selesai" di keyboard langsung menyimpan.
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _save(),
-        ),
-        const SizedBox(height: 8),
-        _SaveButton(onPressed: _saving ? null : _save, loading: _saving),
-      ],
-    );
-  }
-}
-
-/// ------- Sub-view: Alamat Pengambilan -------
-class _AddressView extends ConsumerStatefulWidget {
-  const _AddressView({required this.onBack});
-  final VoidCallback onBack;
-
-  @override
-  ConsumerState<_AddressView> createState() => _AddressViewState();
-}
-
-class _AddressViewState extends ConsumerState<_AddressView> {
-  late final TextEditingController _addr;
-  late final TextEditingController _kelurahan;
-  late final TextEditingController _kota;
-  double? _latitude;
-  double? _longitude;
-  bool _saving = false;
-  final Map<String, String> _errors = {};
-
-  bool get _hasPin => _latitude != null && _longitude != null;
-
-  @override
-  void initState() {
-    super.initState();
-    final user =
-        ref.read(cloudProfileProvider).valueOrNull ?? ref.read(authProvider);
-    _addr = TextEditingController(text: user?.address ?? '');
-    _kelurahan = TextEditingController(text: user?.kelurahan ?? '');
-    _kota = TextEditingController(text: user?.kota ?? '');
-    _latitude = user?.latitude;
-    _longitude = user?.longitude;
-  }
-
-  @override
-  void dispose() {
-    _addr.dispose();
+    _address.dispose();
     _kelurahan.dispose();
     _kota.dispose();
     super.dispose();
   }
 
-  /// Pesan informasi setelah memilih titik di peta (bukan sukses/gagal).
-  void _snack(String message) {
+  void _showInfo(String message) {
     if (!mounted) return;
     AppMessenger.of(context).info(message);
   }
 
-  /// Buka peta pinpoint. Peta langsung mencari GPS bila belum ada titik.
   Future<void> _pickOnMap() async {
     final picked = await context.push<PickedLocation>(
       AppRoutes.pickLocation,
@@ -437,147 +394,18 @@ class _AddressViewState extends ConsumerState<_AddressView> {
       _latitude = picked.latitude;
       _longitude = picked.longitude;
       if (parts != null) {
-        _addr.text = parts.fullAddress;
+        _address.text = parts.fullAddress;
         if (parts.kelurahan.isNotEmpty) _kelurahan.text = parts.kelurahan;
         if (parts.kota.isNotEmpty) _kota.text = parts.kota;
       }
       _errors.clear();
     });
-    _snack(parts != null
+    _showInfo(parts != null
         ? 'Alamat terisi dari titik peta. Lengkapi nomor rumah atau RT/RW, '
-            'lalu tekan Simpan.'
-        : 'Titik dipilih. Isi alamat, kelurahan, dan kota secara manual, '
-            'lalu tekan Simpan.');
+            'lalu simpan profil.'
+        : 'Titik dipilih. Isi alamat, kelurahan, dan kota, lalu simpan profil.');
   }
 
-  Future<void> _save() async {
-    // Tutup keyboard agar pesan error/hasil tidak tertutup.
-    FocusScope.of(context).unfocus();
-    final errors = <String, String>{
-      if (_addr.text.trim().isEmpty) 'addr': 'Alamat lengkap wajib diisi',
-      if (_kelurahan.text.trim().isEmpty)
-        'kelurahan': 'Kelurahan/desa wajib diisi',
-      if (_kota.text.trim().isEmpty) 'kota': 'Kota/kabupaten wajib diisi',
-    };
-    setState(() {
-      _errors
-        ..clear()
-        ..addAll(errors);
-    });
-    if (errors.isNotEmpty) return;
-
-    final messenger = AppMessenger.of(context);
-    final current =
-        ref.read(cloudProfileProvider).valueOrNull ?? ref.read(authProvider);
-    setState(() => _saving = true);
-    try {
-      final outcome = await awaitWrite(
-        ref.read(firebaseRepositoryProvider).saveMyProfile(
-              name: current?.name ?? 'Pengguna',
-              email: current?.email ?? '',
-              phone: current?.phone ?? '',
-              address: _addr.text.trim(),
-              kelurahan: _kelurahan.text.trim(),
-              kota: _kota.text.trim(),
-              latitude: _latitude,
-              longitude: _longitude,
-            ),
-      );
-      ref.read(authProvider.notifier).updateUser(
-            address: _addr.text.trim(),
-            kelurahan: _kelurahan.text.trim(),
-            kota: _kota.text.trim(),
-            latitude: _latitude,
-            longitude: _longitude,
-            clearCoordinates: !_hasPin,
-          );
-      messenger.result(outcome,
-          done: 'Alamat pengambilan tersimpan',
-          queued: 'Alamat tersimpan di perangkat. $queuedSuffix');
-    } catch (error) {
-      showAppSnackBar(messenger,
-          friendlyError(error, fallback: 'Gagal menyimpan alamat. Coba lagi.'),
-          isError: true);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final area =
-        AddressPrivacy.areaLabel(kelurahan: _kelurahan.text, kota: _kota.text);
-
-    return _SubScaffold(
-      title: 'Alamat Pengambilan',
-      onBack: widget.onBack,
-      children: [
-        _pinSection(p),
-        const SizedBox(height: 18),
-        _LabeledField(
-          label: 'Alamat Lengkap',
-          controller: _addr,
-          maxLines: 4,
-          enabled: !_saving,
-          error: _errors['addr'],
-          textCapitalization: TextCapitalization.sentences,
-          hint:
-              'Mis. Jl. Kenanga No. 10 RT 02/RW 05, Kel. Melati, Jakarta Selatan',
-        ),
-        _LabeledField(
-          label: 'Kelurahan / Desa',
-          controller: _kelurahan,
-          enabled: !_saving,
-          error: _errors['kelurahan'],
-          hint: 'Mis. Melati',
-          textCapitalization: TextCapitalization.words,
-          textInputAction: TextInputAction.next,
-          onChanged: (_) => setState(() {}),
-        ),
-        _LabeledField(
-          label: 'Kota / Kabupaten',
-          controller: _kota,
-          enabled: !_saving,
-          error: _errors['kota'],
-          hint: 'Mis. Jakarta Selatan',
-          textCapitalization: TextCapitalization.words,
-          // Field terakhir: "Selesai" di keyboard langsung menyimpan.
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _save(),
-          onChanged: (_) => setState(() {}),
-        ),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: p.primarySoft,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.lock_outline, size: 16, color: p.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Pengguna lain hanya melihat: '
-                  '${area.isEmpty ? '(kelurahan & kota)' : area}. '
-                  'Alamat lengkap dan titik peta hanya dibagikan ke peminta '
-                  'yang pengajuannya kamu terima.',
-                  style:
-                      TextStyle(fontSize: 12.5, height: 1.45, color: p.primary),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _SaveButton(onPressed: _saving ? null : _save, loading: _saving),
-      ],
-    );
-  }
-
-  /// Tombol pinpoint (belum ada titik) atau pratinjau peta (sudah ada titik).
   Widget _pinSection(AppPalette p) {
     if (!_hasPin) {
       return SizedBox(
@@ -645,6 +473,114 @@ class _AddressViewState extends ConsumerState<_AddressView> {
       ],
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final area =
+        AddressPrivacy.areaLabel(kelurahan: _kelurahan.text, kota: _kota.text);
+    return _SubScaffold(
+      title: 'Edit Profil',
+      onBack: widget.onBack,
+      children: [
+        _LabeledField(
+          label: 'Nama Lengkap',
+          controller: _name,
+          enabled: !_saving,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+        ),
+        _LabeledField(
+          label: 'Email',
+          controller: _email,
+          enabled: !_saving,
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+        ),
+        _LabeledField(
+          label: 'Nomor HP',
+          controller: _phone,
+          enabled: !_saving,
+          keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.next,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Alamat Pengambilan',
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w800, color: p.text)),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 14),
+          child: Text(
+            'Alamat pengambilan disimpan bersama profil dan bisa dipakai saat memposting barang.',
+            style: TextStyle(fontSize: 12.5, color: p.textMuted, height: 1.4),
+          ),
+        ),
+        _pinSection(p),
+        const SizedBox(height: 18),
+        _LabeledField(
+          label: 'Alamat Lengkap',
+          controller: _address,
+          maxLines: 4,
+          enabled: !_saving,
+          error: _errors['address'],
+          textCapitalization: TextCapitalization.sentences,
+          hint:
+              'Mis. Jl. Kenanga No. 10 RT 02/RW 05, Kel. Melati, Jakarta Selatan',
+        ),
+        _LabeledField(
+          label: 'Kelurahan / Desa',
+          controller: _kelurahan,
+          enabled: !_saving,
+          error: _errors['kelurahan'],
+          hint: 'Mis. Melati',
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          onChanged: (_) => setState(() {}),
+        ),
+        _LabeledField(
+          label: 'Kota / Kabupaten',
+          controller: _kota,
+          enabled: !_saving,
+          error: _errors['kota'],
+          hint: 'Mis. Jakarta Selatan',
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _save(),
+          onChanged: (_) => setState(() {}),
+        ),
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: p.primarySoft,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lock_outline, size: 16, color: p.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Pengguna lain hanya melihat: '
+                  '${area.isEmpty ? '(kelurahan & kota)' : area}. '
+                  'Alamat lengkap dan titik peta hanya dibagikan ke peminta '
+                  'yang pengajuannya kamu terima.',
+                  style:
+                      TextStyle(fontSize: 12.5, height: 1.45, color: p.primary),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        _SaveButton(onPressed: _saving ? null : _save, loading: _saving),
+      ],
+    );
+  }
 }
 
 /// ------- Sub-view: Bantuan & Panduan -------
@@ -655,7 +591,7 @@ class _HelpView extends StatelessWidget {
   static const _faqs = [
     (
       'Bagaimana cara memberi barang?',
-      'Atur dulu Alamat Pengambilan di Profil (bisa memakai GPS). Lalu buka tab Posting, isi detail barang, pilih metode pengambilan, dan tekan Post. Pengguna lain hanya melihat kelurahan & kota.'
+      'Atur Alamat Pengambilan di bagian Edit Profil (bisa memakai GPS). Lalu buka tab Posting, isi detail barang, pilih metode pengambilan, dan tekan Post. Pengguna lain hanya melihat kelurahan & kota.'
     ),
     (
       'Bagaimana cara meminta barang?',
@@ -892,9 +828,13 @@ class _SaveButton extends StatelessWidget {
                         strokeWidth: 2.5, color: p.onAccent),
                   ),
                   const SizedBox(width: 12),
-                  const Text('Menyimpan…',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                  const Flexible(
+                    child: Text('Menyimpan…',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800)),
+                  ),
                 ],
               )
             : const Text('Simpan',

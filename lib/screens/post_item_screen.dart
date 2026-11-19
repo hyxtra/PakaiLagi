@@ -74,6 +74,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   String? _pickedImagePath; // path foto untuk preview
   XFile? _pickedXFile; // XFile asli untuk readAsBytes (kompatibel web)
 
+  /// Guard double-submit. State PublishLoading di provider baru terpasang
+  /// SETELAH wait readAsBytes(), jadi dua ketukan cepat bisa lolos dan
+  /// membuat dua dokumen. Flag lokal ini aktif sebelum wait pertama dan
+  /// bertahan sampai seluruh proses (termasuk jeda 300 ms provider) selesai.
+  bool _submitting = false;
+
   // ── KONDISI 5: Map error validasi per-field ──
   final Map<String, String> _validationErrors = {};
 
@@ -121,10 +127,14 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     if (source == null) return;
     XFile? result;
     try {
-      // imageQuality menjaga ukuran Base64 jauh di bawah batas 1 MiB per
-      // dokumen.
-      result = await ImagePicker()
-          .pickImage(source: source, maxWidth: 600, imageQuality: 70);
+      // Batasi dimensi dan kualitas agar foto kamera resolusi tinggi tidak
+      // membebani memori saat dibaca dan dienkode menjadi Base64.
+      result = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 75,
+      );
     } catch (_) {
       // Mis. izin kamera/galeri ditolak. Sebelumnya error ini tidak
       // tertangani dan pengguna tidak mendapat penjelasan.
@@ -194,6 +204,8 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   /// Publish barang langsung ke Firestore.
   /// Gambar di-encode menjadi Base64 string (tanpa Firebase Storage).
   Future<void> _handlePublishToCloud() async {
+    // Guard pertama: abaikan ketukan kedua selagi proses sebelumnya berjalan.
+    if (_submitting) return;
     // Tutup keyboard agar pesan hasil dan isian yang salah tidak tertutup.
     FocusScope.of(context).unfocus();
     final isFormValid = _validateForm();
@@ -224,6 +236,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     final messenger = AppMessenger.of(context);
     WriteOutcome? outcome;
     String? errorMessage;
+    setState(() => _submitting = true);
     try {
       // Baca bytes dari XFile (kompatibel web + mobile). Login Firebase
       // dipastikan di repository lewat ensureSignedIn().
@@ -236,6 +249,9 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         imageBytes: imageBytes,
         ownerName: profile.name,
         pickupAddress: profile,
+        // Urutan mengikuti daftar resmi, bukan urutan ketukan.
+        pickupMethods:
+            kPickupMethodNames.where(_selectedMethods.contains).toList(),
       );
       final state = ref.read(cloudItemNotifierProvider);
       if (state is PublishError) errorMessage = state.message;
@@ -244,6 +260,12 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
           fallback: 'Gagal membaca foto. Pilih ulang foto lalu coba lagi.');
     }
 
+    // Selalu dilepas, apa pun hasilnya, agar tombol tidak terkunci selamanya.
+    if (mounted) {
+      setState(() => _submitting = false);
+    } else {
+      _submitting = false;
+    }
     if (!mounted) return;
     if (outcome != null) {
       _resetForm();
@@ -527,7 +549,8 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
 
   Widget _buildForm(AppPalette p, PostItemLoaded loadedState, AppUser? profile,
       bool isPublishing) {
-    final isSubmitting = loadedState.isSubmitting || isPublishing;
+    final isSubmitting =
+        loadedState.isSubmitting || isPublishing || _submitting;
 
     return ListView(
       controller: _scrollCtrl,
@@ -566,9 +589,15 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                 // Preview foto yang sudah dipilih
                 : kIsWeb
                     ? Image.network(_pickedImagePath!,
-                        fit: BoxFit.cover, width: double.infinity)
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        errorBuilder: (_, __, ___) => _previewError(p))
                     : Image.file(File(_pickedImagePath!),
-                        fit: BoxFit.cover, width: double.infinity),
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        // Berkas foto sementara bisa sudah dihapus sistem Android
+                        // dari cache; tampilkan pengganti, bukan layar error.
+                        errorBuilder: (_, __, ___) => _previewError(p)),
           ),
         ),
         if (_validationErrors['image'] != null)
@@ -706,11 +735,16 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // Teks ini menjawab "sedang apa?" selama proses.
-                      const Text(
-                        'Memposting barang…',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700),
+                      // Teks ini menjawab "sedang apa?" selama proses. Flexible +
+                      // elipsis: pada font HP sangat besar teks tidak melimpah.
+                      const Flexible(
+                        child: Text(
+                          'Memposting barang…',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ],
                   )
@@ -728,6 +762,25 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ===========================================================================
   // HELPER WIDGETS
   // ===========================================================================
+
+  /// Pengganti pratinjau saat berkas foto tidak bisa dibuka.
+  Widget _previewError(AppPalette p) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.broken_image_outlined, size: 40, color: p.textMuted),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'Foto tidak dapat ditampilkan. Ketuk untuk memilih ulang.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: p.textMuted, fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
 
   /// Kartu alamat penjemputan dari profil (hanya-baca).
   Widget _pickupAddressCard(AppPalette p, AppUser? profile, bool isSubmitting) {

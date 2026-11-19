@@ -3,6 +3,10 @@
          geocoding membutuhkan internet. Manifest debug/profile sudah punya
          izin ini, manifest main (release) belum. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Memungkinkan aplikasi/plugin memeriksa status jaringan (Firestore dan
+         plugin lain memakainya untuk mendeteksi koneksi). Dideklarasikan
+         eksplisit agar tidak bergantung pada manifest merger dari library. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
@@ -52,6 +56,13 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
+        </intent>
+        <!-- Skema geo: (tautan lokasi). Harus berupa <intent> terpisah:
+             dalam satu <intent>, atribut scheme hanya boleh muncul sekali
+             (dokumentasi package visibility Android). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
         </intent>
     </queries>
 </manifest>
