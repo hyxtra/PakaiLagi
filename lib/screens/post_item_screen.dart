@@ -6,8 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../business/image_base64.dart';
+
 import '../data/pickup_methods.dart';
 import '../models/app_user.dart';
+import '../models/item.dart' show ItemCondition, ListingType;
 import '../notifiers/item_notifier.dart';
 import '../notifiers/item_state.dart';
 import '../providers/auth_provider.dart';
@@ -53,6 +56,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ── Controller & state form ──
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
   final _descFocus = FocusNode();
   final _scrollCtrl = ScrollController();
 
@@ -62,6 +66,9 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
       'image',
       'title',
       'category',
+      'condition',
+      'listingType',
+      'price',
       'desc',
       'methods',
       'addr'
@@ -70,9 +77,10 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   };
 
   String? _selectedCategory;
+  String _selectedCondition = ItemCondition.good;
+  String _listingType = ListingType.gratis;
   final Set<String> _selectedMethods = {}; // multi-select
-  String? _pickedImagePath; // path foto untuk preview
-  XFile? _pickedXFile; // XFile asli untuk readAsBytes (kompatibel web)
+  final List<XFile> _pickedImages = []; // urutan pertama menjadi sampul
 
   /// Guard double-submit. State PublishLoading di provider baru terpasang
   /// SETELAH wait readAsBytes(), jadi dua ketukan cepat bisa lolos dan
@@ -87,6 +95,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   void dispose() {
     _titleCtrl.dispose();
     _descCtrl.dispose();
+    _priceCtrl.dispose();
     _descFocus.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -102,6 +111,10 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _pickImage() async {
+    if (_pickedImages.length >= ImageBase64.maxPhotoCount) {
+      AppMessenger.of(context).info('Maksimal 5 foto untuk satu barang.');
+      return;
+    }
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -125,16 +138,26 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
       ),
     );
     if (source == null) return;
-    XFile? result;
+    List<XFile> results = [];
     try {
       // Batasi dimensi dan kualitas agar foto kamera resolusi tinggi tidak
       // membebani memori saat dibaca dan dienkode menjadi Base64.
-      result = await ImagePicker().pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 75,
-      );
+      if (source == ImageSource.gallery) {
+        results = await ImagePicker().pickMultiImage(
+          limit: ImageBase64.maxPhotoCount - _pickedImages.length,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 75,
+        );
+      } else {
+        final result = await ImagePicker().pickImage(
+          source: source,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 75,
+        );
+        if (result != null) results = [result];
+      }
     } catch (_) {
       // Mis. izin kamera/galeri ditolak. Sebelumnya error ini tidak
       // tertangani dan pengguna tidak mendapat penjelasan.
@@ -145,11 +168,17 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
       }
       return;
     }
-    final picked = result;
-    if (picked == null || !mounted) return;
+    if (results.isEmpty || !mounted) return;
     setState(() {
-      _pickedImagePath = picked.path;
-      _pickedXFile = picked;
+      final remaining = ImageBase64.maxPhotoCount - _pickedImages.length;
+      _pickedImages.addAll(results.take(remaining));
+      _validationErrors.remove('image');
+    });
+  }
+
+  void _removePhoto(int index) {
+    setState(() {
+      _pickedImages.removeAt(index);
       _validationErrors.remove('image');
     });
   }
@@ -170,6 +199,17 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
 
     final categoryErr = ItemValidator.validateCategory(_selectedCategory);
     if (categoryErr != null) errors['category'] = categoryErr;
+
+    if (!ItemCondition.all.contains(_selectedCondition)) {
+      errors['condition'] = 'Pilih kondisi barang';
+    }
+    final listingTypeErr = ItemValidator.validateListingType(_listingType);
+    if (listingTypeErr != null) errors['listingType'] = listingTypeErr;
+    final priceErr = ItemValidator.validateListingPrice(
+      listingType: _listingType,
+      price: int.tryParse(_priceCtrl.text.trim()),
+    );
+    if (priceErr != null) errors['price'] = priceErr;
 
     // Deskripsi wajib diisi (bukan hanya 5 karakter) — pesan lebih jelas
     final descValue = _descCtrl.text.trim();
@@ -209,7 +249,7 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     // Tutup keyboard agar pesan hasil dan isian yang salah tidak tertutup.
     FocusScope.of(context).unfocus();
     final isFormValid = _validateForm();
-    final hasImage = _pickedImagePath != null && _pickedImagePath!.isNotEmpty;
+    final hasImage = _pickedImages.isNotEmpty;
     if (!hasImage) {
       setState(() {
         _validationErrors['image'] = 'Foto barang wajib ditambahkan untuk post';
@@ -240,19 +280,51 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     try {
       // Baca bytes dari XFile (kompatibel web + mobile). Login Firebase
       // dipastikan di repository lewat ensureSignedIn().
-      final imageBytes = await _pickedXFile!.readAsBytes();
+      final selectedPhotos = [..._pickedImages];
+      final photoBytes =
+          await Future.wait(selectedPhotos.map((photo) => photo.readAsBytes()));
       final notifier = ref.read(cloudItemNotifierProvider.notifier);
-      outcome = await notifier.publishItem(
+      final commonArgs = (
         title: _titleCtrl.text.trim(),
         category: _selectedCategory!,
         description: _descCtrl.text.trim(),
-        imageBytes: imageBytes,
+        imageBytes: photoBytes.first,
         ownerName: profile.name,
         pickupAddress: profile,
         // Urutan mengikuti daftar resmi, bukan urutan ketukan.
         pickupMethods:
             kPickupMethodNames.where(_selectedMethods.contains).toList(),
+        condition: _selectedCondition,
+        listingType: _listingType,
+        price: _listingType == ListingType.gratis
+            ? 0
+            : int.tryParse(_priceCtrl.text.trim()) ?? 0,
       );
+      outcome = photoBytes.length == 1 &&
+              _selectedCondition == ItemCondition.good &&
+              _listingType == ListingType.gratis
+          ? await notifier.publishItem(
+              title: commonArgs.title,
+              category: commonArgs.category,
+              description: commonArgs.description,
+              imageBytes: commonArgs.imageBytes,
+              ownerName: commonArgs.ownerName,
+              pickupAddress: commonArgs.pickupAddress,
+              pickupMethods: commonArgs.pickupMethods,
+            )
+          : await notifier.publishItemWithPhotos(
+              title: commonArgs.title,
+              category: commonArgs.category,
+              description: commonArgs.description,
+              imageBytes: commonArgs.imageBytes,
+              additionalImageBytes: photoBytes.skip(1).toList(growable: false),
+              ownerName: commonArgs.ownerName,
+              pickupAddress: commonArgs.pickupAddress,
+              pickupMethods: commonArgs.pickupMethods,
+              condition: commonArgs.condition,
+              listingType: commonArgs.listingType,
+              price: commonArgs.price,
+            );
       final state = ref.read(cloudItemNotifierProvider);
       if (state is PublishError) errorMessage = state.message;
     } catch (error) {
@@ -298,6 +370,9 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
     'image',
     'title',
     'category',
+    'condition',
+    'listingType',
+    'price',
     'desc',
     'methods',
     'addr'
@@ -327,11 +402,13 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   void _resetForm() {
     _titleCtrl.clear();
     _descCtrl.clear();
+    _priceCtrl.clear();
     setState(() {
       _selectedCategory = null;
+      _selectedCondition = ItemCondition.good;
+      _listingType = ListingType.gratis;
       _selectedMethods.clear();
-      _pickedImagePath = null;
-      _pickedXFile = null;
+      _pickedImages.clear();
       _validationErrors.clear();
     });
   }
@@ -554,51 +631,45 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
 
     return ListView(
       controller: _scrollCtrl,
-      // Men-scroll form menutup keyboard.
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
         // ── Foto Barang ──
         _label(p, 'Foto Barang', sectionKey: _sectionKeys['image']),
-        AccessibleTap(
-          onTap: isSubmitting ? null : _pickImage,
-          label: _pickedImagePath == null
-              ? 'Tambah foto barang dari kamera atau galeri'
-              : 'Foto barang sudah dipilih. Ketuk untuk mengganti foto',
-          borderRadius: BorderRadius.circular(14),
-          minSize: 0,
-          child: Container(
-            height: 160,
-            decoration: BoxDecoration(
-              color: p.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: p.border),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: _pickedImagePath == null
-                ? Column(
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (var index = 0; index < _pickedImages.length; index++)
+              _photoTile(p, index, isSubmitting),
+            if (_pickedImages.length < ImageBase64.maxPhotoCount)
+              AccessibleTap(
+                onTap: isSubmitting ? null : _pickImage,
+                label: 'Tambah foto barang. Maksimal 5 foto.',
+                borderRadius: BorderRadius.circular(14),
+                minSize: 0,
+                child: Container(
+                  width: 104,
+                  height: 132,
+                  decoration: BoxDecoration(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.add_photo_alternate_outlined,
-                          size: 40, color: p.textMuted),
+                          size: 34, color: p.textMuted),
                       const SizedBox(height: 8),
                       Text('Tambah Foto',
-                          style: TextStyle(color: p.textMuted, fontSize: 13)),
+                          style: TextStyle(color: p.textMuted, fontSize: 12)),
+                      Text('${_pickedImages.length}/5',
+                          style: TextStyle(color: p.textMuted, fontSize: 11)),
                     ],
-                  )
-                // Preview foto yang sudah dipilih
-                : kIsWeb
-                    ? Image.network(_pickedImagePath!,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        errorBuilder: (_, __, ___) => _previewError(p))
-                    : Image.file(File(_pickedImagePath!),
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        // Berkas foto sementara bisa sudah dihapus sistem Android
-                        // dari cache; tampilkan pengganti, bukan layar error.
-                        errorBuilder: (_, __, ___) => _previewError(p)),
-          ),
+                  ),
+                ),
+              ),
+          ],
         ),
         if (_validationErrors['image'] != null)
           AppErrorText(_validationErrors['image']!),
@@ -652,6 +723,76 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
         const SizedBox(height: 20),
 
         // ── Field: Deskripsi ──
+        _label(p, 'Kondisi Barang', sectionKey: _sectionKeys['condition']),
+        if (_validationErrors['condition'] != null)
+          AppErrorText(_validationErrors['condition']!),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final condition in ItemCondition.all)
+              _chip(
+                p,
+                label: condition,
+                semanticLabel: 'Kondisi $condition',
+                radio: true,
+                selected: _selectedCondition == condition,
+                enabled: !isSubmitting,
+                onTap: () => setState(() {
+                  _selectedCondition = condition;
+                  _validationErrors.remove('condition');
+                }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        _label(p, 'Jenis Penawaran', sectionKey: _sectionKeys['listingType']),
+        if (_validationErrors['listingType'] != null)
+          AppErrorText(_validationErrors['listingType']!),
+        Wrap(
+          spacing: 8,
+          children: [
+            _chip(
+              p,
+              label: 'Gratis',
+              semanticLabel: 'Barang gratis',
+              radio: true,
+              selected: _listingType == ListingType.gratis,
+              enabled: !isSubmitting,
+              onTap: () => setState(() {
+                _listingType = ListingType.gratis;
+                _priceCtrl.clear();
+                _validationErrors.remove('listingType');
+                _validationErrors.remove('price');
+              }),
+            ),
+            _chip(
+              p,
+              label: 'Tebus Murah',
+              semanticLabel: 'Tebus murah maksimal Rp50.000',
+              radio: true,
+              selected: _listingType == ListingType.tebusMurah,
+              enabled: !isSubmitting,
+              onTap: () => setState(() {
+                _listingType = ListingType.tebusMurah;
+                _validationErrors.remove('listingType');
+              }),
+            ),
+          ],
+        ),
+        if (_listingType == ListingType.tebusMurah) ...[
+          const SizedBox(height: 12),
+          AppLabeledField(
+            label: 'Harga tebus (maksimal Rp50.000)',
+            sectionKey: _sectionKeys['price'],
+            controller: _priceCtrl,
+            hint: 'Contoh: 10000',
+            enabled: !isSubmitting,
+            error: _validationErrors['price'],
+            keyboardType: TextInputType.number,
+          ),
+        ],
+        const SizedBox(height: 20),
+
         AppLabeledField(
           label: 'Deskripsi',
           sectionKey: _sectionKeys['desc'],
@@ -764,18 +905,95 @@ class _PostItemScreenState extends ConsumerState<PostItemScreen> {
   // ===========================================================================
 
   /// Pengganti pratinjau saat berkas foto tidak bisa dibuka.
+  Widget _photoTile(AppPalette p, int index, bool isSubmitting) {
+    final photo = _pickedImages[index];
+    final isCover = index == 0;
+    return SizedBox(
+      width: 104,
+      height: 132,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          GestureDetector(
+            onTap: isSubmitting || isCover
+                ? null
+                : () => setState(() {
+                      _pickedImages.removeAt(index);
+                      _pickedImages.insert(0, photo);
+                    }),
+            child: Container(
+              decoration: BoxDecoration(
+                color: p.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: isCover ? p.primary : p.border,
+                    width: isCover ? 2 : 1),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: kIsWeb
+                        ? Image.network(photo.path,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _previewError(p))
+                        : Image.file(File(photo.path),
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _previewError(p)),
+                  ),
+                  SizedBox(
+                    height: 29,
+                    child: Center(
+                      child: Text(
+                        isCover ? 'Sampul' : 'Jadikan sampul',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isCover ? p.primary : p.textMuted,
+                          fontSize: 10,
+                          fontWeight: isCover ? FontWeight.w700 : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 3,
+            right: 3,
+            child: IconButton.filledTonal(
+              tooltip: 'Hapus foto ${index + 1}',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+              onPressed: isSubmitting ? null : () => _removePhoto(index),
+              icon: const Icon(Icons.close, size: 18),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _previewError(AppPalette p) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(Icons.broken_image_outlined, size: 40, color: p.textMuted),
-        const SizedBox(height: 8),
+        Icon(Icons.broken_image_outlined, size: 28, color: p.textMuted),
+        const SizedBox(height: 4),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
             'Foto tidak dapat ditampilkan. Ketuk untuk memilih ulang.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: p.textMuted, fontSize: 13),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: p.textMuted, fontSize: 10),
           ),
         ),
       ],

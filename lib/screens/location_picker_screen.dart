@@ -325,9 +325,11 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              '${_center.latitude.toStringAsFixed(6)}, '
-              '${_center.longitude.toStringAsFixed(6)}'
+              '${_center.latitude.toStringAsFixed(4)}, '
+              '${_center.longitude.toStringAsFixed(4)}'
               '${_gpsAccuracy != null ? '  •  Akurasi GPS ±${_gpsAccuracy!.round()} m' : ''}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, color: p.textMuted),
             ),
             const SizedBox(height: 14),

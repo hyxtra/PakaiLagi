@@ -124,6 +124,9 @@ class _ActivityScreenState extends ConsumerState<ActivityScreen> {
         swatch: const Color(0xFF2F6B4F),
         pickupMethods: data.availablePickupMethods,
         address: data.areaLabel,
+        condition: data.condition,
+        listingType: data.listingType,
+        price: data.price,
         imageUrl:
             data.imageBase64.isEmpty ? null : 'base64:${data.imageBase64}',
       );

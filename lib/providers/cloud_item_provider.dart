@@ -53,10 +53,15 @@ final myCloudItemsStreamProvider = StreamProvider<List<ItemModel>>((ref) {
 });
 
 /// Detail satu barang berdasarkan Firestore document ID.
+/// Memakai autoDispose dan memantau auth state agar pergantian akun
+/// tidak menyisakan cache error `permission-denied`.
 final cloudItemByIdProvider =
-    StreamProvider.family<ItemModel?, String>((ref, id) {
-  final repository = ref.watch(firebaseRepositoryProvider);
-  return repository.getItemById(id);
+    StreamProvider.autoDispose.family<ItemModel?, String>((ref, id) async* {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) {
+    await ref.watch(firebaseAuthServiceProvider).ensureSignedIn();
+  }
+  yield* ref.watch(firebaseRepositoryProvider).getItemById(id);
 });
 
 /// ID barang cloud yang sedang diajukan oleh user Firebase aktif.
@@ -158,6 +163,32 @@ class CloudItemNotifier extends StateNotifier<PublishState> {
     required String ownerName,
     required AppUser pickupAddress,
     required List<String> pickupMethods,
+  }) =>
+      publishItemWithPhotos(
+        title: title,
+        category: category,
+        description: description,
+        imageBytes: imageBytes,
+        ownerName: ownerName,
+        pickupAddress: pickupAddress,
+        pickupMethods: pickupMethods,
+        additionalImageBytes: const [],
+      );
+
+  /// Versi galeri multi-foto. [publishItem] tetap dipertahankan dengan
+  /// signature lama agar pemanggil dan notifier test yang sudah ada cocok.
+  Future<WriteOutcome?> publishItemWithPhotos({
+    required String title,
+    required String category,
+    required String description,
+    required Uint8List imageBytes,
+    required String ownerName,
+    required AppUser pickupAddress,
+    required List<String> pickupMethods,
+    required List<Uint8List> additionalImageBytes,
+    String condition = 'Layak Pakai',
+    String listingType = 'gratis',
+    int price = 0,
   }) async {
     state = const PublishLoading();
 
@@ -171,6 +202,10 @@ class CloudItemNotifier extends StateNotifier<PublishState> {
           category: category,
           description: description,
           imageBytes: imageBytes,
+          additionalImageBytes: additionalImageBytes,
+          condition: condition,
+          listingType: listingType,
+          price: price,
           ownerName: ownerName,
           fullAddress: pickupAddress.address.trim(),
           kelurahan: pickupAddress.kelurahan.trim(),

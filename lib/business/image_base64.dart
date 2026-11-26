@@ -8,6 +8,12 @@ abstract final class ImageBase64 {
   /// field lain (judul, deskripsi, dst.).
   static const int maxEncodedLength = 900000;
 
+  /// Anggaran per foto saat sebuah dokumen berisi galeri maksimal lima foto.
+  /// 5 × 175 KB Base64 = 875 KB, menyisakan ruang bagi field dokumen.
+  static const int maxPhotoCount = 5;
+  static const int maxPhotoEncodedLength = 175000;
+  static const int maxGalleryEncodedLength = 875000;
+
   static String encode(Uint8List bytes) => base64Encode(bytes);
 
   /// Panjang string Base64 untuk [byteLength] byte: 4 karakter per 3 byte,

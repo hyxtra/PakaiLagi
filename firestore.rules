@@ -40,6 +40,24 @@ service cloud.firestore {
       return exists(path) && get(path).data.status == 'accepted';
     }
 
+    function validAdditionalImages(data) {
+      return !('additionalImages' in data)
+        || (data.additionalImages is list
+            && data.additionalImages.size() <= 4
+            && (data.additionalImages.size() < 1
+                || (data.additionalImages[0] is string
+                    && data.additionalImages[0].size() < 175000))
+            && (data.additionalImages.size() < 2
+                || (data.additionalImages[1] is string
+                    && data.additionalImages[1].size() < 175000))
+            && (data.additionalImages.size() < 3
+                || (data.additionalImages[2] is string
+                    && data.additionalImages[2].size() < 175000))
+            && (data.additionalImages.size() < 4
+                || (data.additionalImages[3] is string
+                    && data.additionalImages[3].size() < 175000)));
+    }
+
     // -------------------------------------------------------------------------
     // PROFIL — berisi nama, email, nomor HP, alamat lengkap, koordinat.
     // -------------------------------------------------------------------------
@@ -57,9 +75,9 @@ service cloud.firestore {
       // tidak mungkin tersimpan di dokumen publik.
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
-             'title', 'category', 'description', 'imageBase64', 'donorId',
-             'ownerName', 'kelurahan', 'kota', 'pickupMethods', 'status',
-             'createdAt'])
+             'title', 'category', 'description', 'imageBase64', 'additionalImages', 'donorId',
+             'ownerName', 'kelurahan', 'kota', 'pickupMethods', 'condition',
+             'listingType', 'price', 'status', 'createdAt'])
         // pickupMethods opsional (barang lama tidak punya). Bila ada: daftar
         // berisi 1–5 nama metode berupa teks.
         && (!('pickupMethods' in request.resource.data)
@@ -77,7 +95,20 @@ service cloud.firestore {
         && request.resource.data.kelurahan is string
         && request.resource.data.kota is string
         && request.resource.data.imageBase64 is string
+        && request.resource.data.condition in ['Seperti Baru', 'Sangat Layak', 'Layak Pakai']
+        && request.resource.data.listingType in ['gratis', 'tebus_murah']
+        && request.resource.data.price is int
+        && request.resource.data.price >= 0
+        && request.resource.data.price <= 50000
+        && (request.resource.data.listingType == 'tebus_murah'
+            || request.resource.data.price == 0)
         && request.resource.data.imageBase64.size() < 900000
+        && validAdditionalImages(request.resource.data)
+        // Galeri: cover + hingga empat foto, tiap Base64 string <175 KB.
+        // Batas ini membuat total payload foto tidak melewati 875 KB.
+        && (!('additionalImages' in request.resource.data)
+            || request.resource.data.additionalImages.size() == 0
+            || request.resource.data.imageBase64.size() < 175000)
         && request.resource.data.createdAt == request.time;
 
       // Pemilik hanya boleh mengubah status.
@@ -126,9 +157,12 @@ service cloud.firestore {
         && requestId == request.resource.data.itemId + '_' + uid()
         && request.resource.data.keys().hasOnly([
              'itemId', 'ownerId', 'requesterId', 'requesterName', 'method',
-             'status', 'createdAt'])
+             'status', 'createdAt', 'reason'])
         && request.resource.data.requesterId == uid()
         && request.resource.data.status == 'pending'
+        && (!('reason' in request.resource.data)
+            || (request.resource.data.reason is string
+                && request.resource.data.reason.size() <= 240))
         && request.resource.data.ownerId != uid()
         && request.resource.data.ownerId
              == get(itemPath(request.resource.data.itemId)).data.donorId

@@ -8,6 +8,7 @@ class CloudPickupRequest {
     required this.requesterName,
     required this.method,
     required this.status,
+    this.reason = '',
   });
 
   final String id;
@@ -16,6 +17,7 @@ class CloudPickupRequest {
   final String requesterName;
   final String method;
   final String status;
+  final String reason;
 
   factory CloudPickupRequest.fromFirestore(
       DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -27,6 +29,7 @@ class CloudPickupRequest {
       requesterName: data['requesterName'] as String? ?? 'Pengguna',
       method: data['method'] as String? ?? 'Tidak dicantumkan',
       status: data['status'] as String? ?? 'pending',
+      reason: data['reason'] as String? ?? '',
     );
   }
 }

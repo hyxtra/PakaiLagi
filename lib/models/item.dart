@@ -2,6 +2,18 @@ import 'package:flutter/material.dart';
 
 enum ItemStatus { available, reserved, completed }
 
+abstract final class ItemCondition {
+  static const likeNew = 'Seperti Baru';
+  static const veryGood = 'Sangat Layak';
+  static const good = 'Layak Pakai';
+  static const all = [likeNew, veryGood, good];
+}
+
+abstract final class ListingType {
+  static const gratis = 'gratis';
+  static const tebusMurah = 'tebus_murah';
+}
+
 extension ItemStatusX on ItemStatus {
   String get label => switch (this) {
         ItemStatus.available => 'TERSEDIA',
@@ -31,6 +43,9 @@ class Item {
     required this.pickupMethods,
     required this.address,
     this.imageUrl,
+    this.condition = ItemCondition.good,
+    this.listingType = ListingType.gratis,
+    this.price = 0,
   });
 
   final String id;
@@ -45,8 +60,17 @@ class Item {
   final List<String> pickupMethods;
   final String address;
   final String? imageUrl;
+  final String condition;
+  final String listingType;
+  final int price;
 
-  Item copyWith({ItemStatus? status, String? imageUrl}) {
+  Item copyWith({
+    ItemStatus? status,
+    String? imageUrl,
+    String? condition,
+    String? listingType,
+    int? price,
+  }) {
     return Item(
       id: id,
       title: title,
@@ -60,6 +84,9 @@ class Item {
       pickupMethods: pickupMethods,
       address: address,
       imageUrl: imageUrl ?? this.imageUrl,
+      condition: condition ?? this.condition,
+      listingType: listingType ?? this.listingType,
+      price: price ?? this.price,
     );
   }
 }

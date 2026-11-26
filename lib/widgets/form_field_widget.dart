@@ -64,6 +64,7 @@ class AppTextField extends StatelessWidget {
     this.textInputAction,
     this.onSubmitted,
     this.textCapitalization = TextCapitalization.none,
+    this.keyboardType,
   });
 
   final TextEditingController controller;
@@ -75,6 +76,7 @@ class AppTextField extends StatelessWidget {
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
   final TextCapitalization textCapitalization;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +92,7 @@ class AppTextField extends StatelessWidget {
           textInputAction: textInputAction,
           onSubmitted: onSubmitted,
           textCapitalization: textCapitalization,
+          keyboardType: keyboardType,
           // Ruang ekstra di bawah field yang difokuskan agar pesan error
           // di bawahnya tetap terlihat di atas keyboard.
           scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
@@ -146,6 +149,7 @@ class AppLabeledField extends StatelessWidget {
     this.textInputAction,
     this.onSubmitted,
     this.textCapitalization = TextCapitalization.none,
+    this.keyboardType,
   });
 
   final String label;
@@ -159,6 +163,7 @@ class AppLabeledField extends StatelessWidget {
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
   final TextCapitalization textCapitalization;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
@@ -192,6 +197,7 @@ class AppLabeledField extends StatelessWidget {
             textInputAction: textInputAction,
             onSubmitted: onSubmitted,
             textCapitalization: textCapitalization,
+            keyboardType: keyboardType,
           ),
         ],
       ),

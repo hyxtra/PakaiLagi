@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../business/image_base64.dart';
+import '../business/item_filters.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
@@ -15,13 +15,13 @@ import '../widgets/item_card.dart';
 
 /// Batas lebar layar kecil/besar (dp). Di bawah ini: daftar 1 kolom (HP
 /// portrait). Di atas ini: grid (tablet, HP landscape, browser lebar).
-const double kWideBreakpoint = 600;
+const double kWideBreakpoint = 360;
 
 /// Batas lebar untuk grid 3 kolom (dp).
 const double kExtraWideBreakpoint = 900;
 
 /// Jumlah kolom daftar barang di Beranda menurut lebar yang tersedia.
-/// 1 = daftar vertikal (ListView), 2–3 = grid (GridView).
+/// Layar sangat sempit memakai satu kolom, HP dua kolom, layar lebar tiga.
 int homeColumnsForWidth(double maxWidth) {
   if (maxWidth < kWideBreakpoint) return 1;
   if (maxWidth < kExtraWideBreakpoint) return 2;
@@ -62,6 +62,14 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String _query = '';
   String _cat = 'Semua';
+  String _condition = 'Semua';
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   /// Konversi data Firestore Map → Item model agar bisa pakai ItemCard.
   Item _cloudMapToItem(ItemModel data) {
@@ -77,6 +85,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       swatch: const Color(0xFF2F6B4F),
       pickupMethods: data.availablePickupMethods,
       address: '',
+      condition: data.condition,
+      listingType: data.listingType,
+      price: data.price,
       // Simpan Base64 string sebagai imageUrl, akan di-handle khusus
       imageUrl:
           data.imageBase64.isNotEmpty ? 'base64:${data.imageBase64}' : null,
@@ -92,12 +103,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final cloudAsync = ref.watch(cloudItemsStreamProvider);
     final cloudItems = cloudAsync.valueOrNull ?? const <ItemModel>[];
-    final filtered = cloudItems.map(_cloudMapToItem).where((item) {
-      if (item.status != ItemStatus.available) return false;
-      final matchQuery =
-          item.title.toLowerCase().contains(_query.toLowerCase());
-      return matchQuery && (_cat == 'Semua' || item.category == _cat);
-    }).toList();
+    final filtered = filterItems(
+      items: cloudItems,
+      query: _query,
+      category: _cat,
+      condition: _condition,
+    ).map(_cloudMapToItem).toList(growable: false);
     final cats = ['Semua', ...kCategories.map((c) => c.name)];
     final chipHeight =
         MediaQuery.textScalerOf(context).scale(36).clamp(36.0, 80.0);
@@ -187,7 +198,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: TextField(
-            onChanged: (v) => setState(() => _query = v),
+            controller: _searchController,
+            onChanged: (v) => setState(() {
+              _query = v;
+              if (v.trim().isEmpty) {
+                _cat = 'Semua';
+                _condition = 'Semua';
+              }
+            }),
             // Tombol keyboard "Cari" menutup keyboard agar hasil terlihat.
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => FocusScope.of(context).unfocus(),
@@ -196,6 +214,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               hintText: 'Cari barang, mis. meja belajar…',
               hintStyle: TextStyle(color: p.textMuted),
               prefixIcon: Icon(Icons.search, color: p.textMuted, size: 18),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Hapus pencarian',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _query = '';
+                          _cat = 'Semua';
+                          _condition = 'Semua';
+                        });
+                      },
+                      icon: Icon(Icons.close, color: p.textMuted, size: 18),
+                    ),
               filled: true,
               fillColor: p.surface,
               contentPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -208,6 +240,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 borderSide: BorderSide(color: p.border),
               ),
             ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text('Kondisi barang',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: p.textMuted)),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: chipRowHeight,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: ItemCondition.all.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, index) {
+              final condition =
+                  index == 0 ? 'Semua' : ItemCondition.all[index - 1];
+              final active = condition == _condition;
+              return AccessibleTap(
+                onTap: () => setState(() => _condition = condition),
+                label: 'Filter kondisi $condition',
+                selected: active,
+                radio: true,
+                borderRadius: BorderRadius.circular(30),
+                child: Container(
+                  height: chipHeight,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: active ? p.primary : p.surface,
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: active ? p.primary : p.border),
+                  ),
+                  child: Text(condition,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: active ? p.onPrimary : p.textMuted)),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 14),
@@ -398,14 +476,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             physics: embedded ? const NeverScrollableScrollPhysics() : null,
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             itemCount: items.length,
-            itemBuilder: (_, i) => _buildItemCard(items[i], p),
+            itemBuilder: (_, i) => _buildItemCard(items[i]),
           );
         }
 
-        // Tinggi sel grid tetap (kartu berisi foto 92 dp + teks) dan ikut
-        // membesar bila ukuran font HP diperbesar, agar teks tidak terpotong.
+        // Kartu foto-first memerlukan tinggi berdasarkan lebar aktual sel;
+        // ruang teks ikut membesar sesuai skala font agar grid tidak overflow.
+        final cellWidth = (constraints.maxWidth - (columns - 1) * 16) / columns;
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
         final cellHeight =
-            MediaQuery.textScalerOf(context).scale(138).clamp(138.0, 320.0);
+            (cellWidth * 0.75 + 150 * textScale).clamp(250.0, 900.0);
         return GridView.builder(
           keyboardDismissBehavior: dismiss,
           shrinkWrap: embedded,
@@ -419,155 +499,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             mainAxisExtent: cellHeight,
           ),
           itemCount: items.length,
-          itemBuilder: (_, i) => _buildItemCard(items[i], p),
+          itemBuilder: (_, i) => _buildItemCard(items[i]),
         );
       },
     );
   }
 
-  /// Build card yang bisa menampilkan foto Base64 dari cloud
-  /// atau foto biasa dari data lokal.
-  Widget _buildItemCard(Item item, AppPalette p) {
-    // Jika imageUrl dimulai "base64:", render Image.memory
-    final isBase64 =
-        item.imageUrl != null && item.imageUrl!.startsWith('base64:');
-
-    if (isBase64) {
-      final b64 = item.imageUrl!.substring(7); // hapus prefix "base64:"
-      // decodeOrNull: Base64 rusak tidak boleh melempar FormatException saat
-      // build (errorBuilder hanya menangkap kegagalan decode GAMBAR, bukan
-      // kegagalan decode Base64-nya).
-      final photoBytes = ImageBase64.decodeOrNull(b64);
-      Widget photoFallback() => Container(
-            color: p.primary,
-            alignment: Alignment.center,
-            child: Text(categoryEmoji(item.category),
-                style: const TextStyle(fontSize: 32)),
-          );
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 14),
-        child: AccessibleTap(
-          onTap: () => context.push(AppRoutes.itemDetail(item.id)),
-          label: ItemCard.semanticLabel(item),
-          borderRadius: BorderRadius.circular(18),
-          minSize: 0,
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: p.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: p.border),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6))
-              ],
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: SizedBox(
-                    width: 92,
-                    height: 92,
-                    child: photoBytes == null
-                        ? photoFallback()
-                        : Image.memory(
-                            photoBytes,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => photoFallback(),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          // Expanded + Align: badge status tetap di kanan, dan
-                          // nama kategori panjang/font besar tidak overflow.
-                          Expanded(
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: p.primarySoft,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  '${categoryEmoji(item.category)} ${item.category}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: p.primary),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(6),
-                              color: p.statusAvailable.withValues(alpha: 0.12),
-                            ),
-                            child: Text(
-                              '◎ TERSEDIA',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: p.statusAvailable),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            height: 1.25,
-                            color: p.text),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(Icons.person_outline,
-                              size: 13, color: p.textMuted),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              item.ownerName,
-                              overflow: TextOverflow.ellipsis,
-                              style:
-                                  TextStyle(fontSize: 12.5, color: p.textMuted),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Item lokal — pakai ItemCard biasa
+  /// Kartu feed yang dipakai untuk barang cloud maupun lokal.
+  Widget _buildItemCard(Item item) {
     return ItemCard(
       item: item,
       onTap: () => context.push(AppRoutes.itemDetail(item.id)),

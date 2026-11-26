@@ -216,7 +216,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
     if (confirmed != true || !mounted) return;
     final messenger = AppMessenger.of(context);
-    ref.read(authProvider.notifier).signOut();
+    await ref.read(authProvider.notifier).signOut();
     messenger.info('Kamu sudah keluar dari akun.');
   }
 
@@ -494,8 +494,17 @@ class _EditProfileViewState extends ConsumerState<_EditProfileView> {
           label: 'Email',
           controller: _email,
           enabled: !_saving,
+          readOnly: true,
           keyboardType: TextInputType.emailAddress,
           textInputAction: TextInputAction.next,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 0, bottom: 14),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Email login dikelola di akun Firebase.',
+                style: TextStyle(fontSize: 12, color: p.textMuted)),
+          ),
         ),
         _LabeledField(
           label: 'Nomor HP',
@@ -681,8 +690,6 @@ class _SubScaffold extends StatelessWidget {
         Divider(height: 1, color: p.border),
         Expanded(
           child: ListView(
-            // Men-scroll form menutup keyboard.
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
             children: children,
           ),
@@ -700,6 +707,7 @@ class _LabeledField extends StatelessWidget {
     this.keyboardType,
     this.hint,
     this.enabled = true,
+    this.readOnly = false,
     this.error,
     this.onChanged,
     this.textInputAction,
@@ -712,6 +720,7 @@ class _LabeledField extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? hint;
   final bool enabled;
+  final bool readOnly;
   final String? error;
 
   /// Hanya terpanggil oleh ketikan pengguna, bukan oleh perubahan
@@ -748,6 +757,7 @@ class _LabeledField extends StatelessWidget {
               maxLines: maxLines,
               keyboardType: keyboardType,
               enabled: enabled,
+              readOnly: readOnly,
               onChanged: onChanged,
               textInputAction: textInputAction,
               onSubmitted: onSubmitted,

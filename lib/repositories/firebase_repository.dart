@@ -91,16 +91,35 @@ class FirebaseRepository {
     required List<String> pickupMethods,
     double? latitude,
     double? longitude,
+    List<Uint8List> additionalImageBytes = const [],
+    String condition = 'Layak Pakai',
+    String listingType = 'gratis',
+    int price = 0,
   }) async {
     // Cek ukuran SEBELUM mengirim: server menolak foto yang lewat batas dengan
     // pesan "Akses ditolak", yang menyesatkan pengguna.
-    if (!ImageBase64.fitsFirestoreLimit(imageBytes.length)) {
-      final kb = (imageBytes.length / 1024).round();
-      throw Exception('Foto terlalu besar ($kb KB). Ambil ulang foto atau '
-          'pilih foto dengan ukuran lebih kecil.');
+    final allPhotoBytes = [imageBytes, ...additionalImageBytes];
+    if (allPhotoBytes.length > ImageBase64.maxPhotoCount) {
+      throw Exception('Pilih maksimal 5 foto barang.');
+    }
+    final encodedLength = allPhotoBytes.fold<int>(
+        0, (total, bytes) => total + ImageBase64.encodedLength(bytes.length));
+    final hasMultiplePhotos = allPhotoBytes.length > 1;
+    final photoTooLarge = hasMultiplePhotos
+        ? allPhotoBytes.any((bytes) =>
+            ImageBase64.encodedLength(bytes.length) >=
+            ImageBase64.maxPhotoEncodedLength)
+        : !ImageBase64.fitsFirestoreLimit(imageBytes.length);
+    if (photoTooLarge ||
+        (hasMultiplePhotos &&
+            encodedLength > ImageBase64.maxGalleryEncodedLength)) {
+      throw Exception('Ukuran foto terlalu besar untuk diunggah bersama. '
+          'Pilih foto lain atau kurangi jumlah foto.');
     }
     final donorId = (await _authService.ensureSignedIn()).uid;
-    final imageBase64 = await _encodeBytesToBase64(imageBytes);
+    final encodedPhotos =
+        await Future.wait(allPhotoBytes.map(_encodeBytesToBase64));
+    final imageBase64 = encodedPhotos.first;
 
     final itemRef = _firestore.collection(_itemsCollection).doc();
     final batch = _firestore.batch();
@@ -109,11 +128,16 @@ class FirebaseRepository {
       'category': category,
       'description': description,
       'imageBase64': imageBase64,
+      if (encodedPhotos.length > 1)
+        'additionalImages': encodedPhotos.skip(1).toList(growable: false),
       'donorId': donorId,
       'ownerName': ownerName,
       'kelurahan': kelurahan,
       'kota': kota,
       'pickupMethods': pickupMethods,
+      'condition': condition,
+      'listingType': listingType,
+      'price': price,
       'status': ItemStatusRules.available,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -207,6 +231,7 @@ class FirebaseRepository {
   Future<void> createPickupRequest({
     required String itemId,
     required String method,
+    String reason = '',
   }) async {
     final requesterId = (await _authService.ensureSignedIn()).uid;
     final item =
@@ -245,6 +270,7 @@ class FirebaseRepository {
         'requesterId': requesterId,
         'requesterName': requesterName,
         'method': method,
+        if (reason.trim().isNotEmpty) 'reason': reason.trim(),
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       })
@@ -440,6 +466,24 @@ class FirebaseRepository {
           longitude: (data['longitude'] as num?)?.toDouble(),
         );
       },
+    );
+  }
+
+  /// Profil satu kali baca saat sesi email/password dipulihkan atau masuk.
+  Future<AppUser?> getMyProfileOnce(String uid) async {
+    final doc = await _firestore.collection(_profilesCollection).doc(uid).get();
+    final data = doc.data();
+    if (data == null) return null;
+    return AppUser(
+      id: doc.id,
+      name: data['name'] as String? ?? 'Pengguna',
+      email: data['email'] as String? ?? '',
+      phone: data['phone'] as String? ?? '',
+      address: data['address'] as String? ?? '',
+      kelurahan: data['kelurahan'] as String? ?? '',
+      kota: data['kota'] as String? ?? '',
+      latitude: (data['latitude'] as num?)?.toDouble(),
+      longitude: (data['longitude'] as num?)?.toDouble(),
     );
   }
 

@@ -93,6 +93,9 @@ class ManageRequestScreen extends ConsumerWidget {
         swatch: const Color(0xFF2F6B4F),
         pickupMethods: item.availablePickupMethods,
         address: item.areaLabel,
+        condition: item.condition,
+        listingType: item.listingType,
+        price: item.price,
         imageUrl:
             item.imageBase64.isEmpty ? null : 'base64:${item.imageBase64}',
       );
@@ -154,6 +157,11 @@ class ManageRequestScreen extends ConsumerWidget {
         ]),
         const SizedBox(height: 12),
         Text('Metode: ${request.method}', style: TextStyle(color: p.textMuted)),
+        if (request.reason.trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('Alasan: ${request.reason}',
+              style: TextStyle(color: p.text, height: 1.4)),
+        ],
         if (pending) ...[
           const SizedBox(height: 12),
           Row(children: [

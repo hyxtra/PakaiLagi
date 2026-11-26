@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../business/share_formatter.dart';
+import '../business/distance_helper.dart';
 import '../data/pickup_methods.dart';
+import '../business/image_base64.dart';
 import '../business/item_ownership.dart';
 import '../business/item_status_rules.dart';
 import '../models/item.dart';
@@ -40,7 +44,10 @@ class ItemDetailScreen extends ConsumerWidget {
         backgroundColor: context.palette.bg,
         body: const Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) => _notFoundScaffold(context),
+      error: (_, __) => _notFoundScaffold(
+        context,
+        onRetry: () => ref.invalidate(cloudItemByIdProvider(itemId)),
+      ),
       data: (data) {
         if (data == null) return _notFoundScaffold(context);
         return _detailScaffold(
@@ -62,24 +69,51 @@ class ItemDetailScreen extends ConsumerWidget {
               swatch: const Color(0xFF2F6B4F),
               pickupMethods: data.availablePickupMethods,
               address: data.areaLabel,
+              condition: data.condition,
+              listingType: data.listingType,
+              price: data.price,
               imageUrl:
                   data.imageBytes == null ? null : 'base64:${data.imageBase64}',
             ),
-            isCloudItem: true);
+            isCloudItem: true,
+            galleryBase64: data.allImageBase64);
       },
     );
   }
 
-  Scaffold _notFoundScaffold(BuildContext context) => Scaffold(
+  Scaffold _notFoundScaffold(BuildContext context, {VoidCallback? onRetry}) =>
+      Scaffold(
         backgroundColor: context.palette.bg,
         appBar: AppBar(),
-        body: const Center(child: Text('Detail barang tidak dapat dimuat')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Detail barang tidak dapat dimuat',
+                  textAlign: TextAlign.center,
+                ),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Coba lagi'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       );
 
   Widget _detailScaffold(BuildContext context, WidgetRef ref, Item item,
-      {bool isCloudItem = false}) {
+      {bool isCloudItem = false, List<String> galleryBase64 = const []}) {
     final p = context.palette;
     final user = ref.watch(authProvider);
+    final profile = ref.watch(cloudProfileProvider).valueOrNull ?? user;
     final firebaseUid = ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
 
     final ownedByMe = user != null && item.ownerId == user.id;
@@ -108,8 +142,11 @@ class ItemDetailScreen extends ConsumerWidget {
               children: [
                 Stack(
                   children: [
-                    PhotoPlaceholder(
-                        item: item, height: 280, radius: 0, large: true),
+                    if (galleryBase64.length > 1)
+                      _ItemPhotoGallery(item: item, images: galleryBase64)
+                    else
+                      PhotoPlaceholder(
+                          item: item, height: 280, radius: 0, large: true),
                     Positioned(
                       // Area sentuh 48 dp; lingkaran tampilan tetap 40 dp,
                       // jadi posisi visualnya sama seperti sebelumnya.
@@ -121,6 +158,18 @@ class ItemDetailScreen extends ConsumerWidget {
                           const Color(0xFF1E2621),
                           Colors.white.withValues(alpha: 0.92),
                           () => context.pop(),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: SafeArea(
+                        child: _circleButton(
+                          Icons.share_outlined,
+                          const Color(0xFF1E2621),
+                          Colors.white.withValues(alpha: 0.92),
+                          () => _shareOnWhatsApp(context, item),
                         ),
                       ),
                     ),
@@ -141,11 +190,23 @@ class ItemDetailScreen extends ConsumerWidget {
                         header: true,
                         child: Text(item.title,
                             style: TextStyle(
-                                fontSize: 22,
+                                fontSize: 26,
                                 fontWeight: FontWeight.w800,
                                 height: 1.25,
                                 color: p.text)),
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        ShareFormatter.priceLabel(
+                            listingType: item.listingType, price: item.price),
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: p.primary),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Kondisi: ${item.condition}',
+                          style: TextStyle(fontSize: 13, color: p.textMuted)),
                       const SizedBox(height: 20),
                       Semantics(
                         header: true,
@@ -167,6 +228,8 @@ class ItemDetailScreen extends ConsumerWidget {
                           itemId: item.id,
                           areaLabel: item.address,
                           isOwner: canDeleteCloudItem,
+                          currentLatitude: profile?.latitude,
+                          currentLongitude: profile?.longitude,
                         ),
                       ],
                       const SizedBox(height: 22),
@@ -434,6 +497,30 @@ class ItemDetailScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _shareOnWhatsApp(BuildContext context, Item item) async {
+    final messenger = AppMessenger.of(context);
+    final text = ShareFormatter.formatItemSummary(
+      title: item.title,
+      category: item.category,
+      condition: item.condition,
+      listingType: item.listingType,
+      price: item.price,
+      area: item.address,
+      description: item.description,
+    );
+    final uri = Uri.https('wa.me', '/', {'text': text});
+    try {
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && context.mounted) {
+        messenger.error('WhatsApp tidak dapat dibuka di perangkat ini.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        messenger.error('WhatsApp tidak dapat dibuka di perangkat ini.');
+      }
+    }
+  }
+
   /// Tombol utama calon penerima. Teksnya mencerminkan status pengajuan
   /// sehingga pengguna tahu langkah berikutnya tanpa menebak.
   Widget _requestButton(
@@ -467,16 +554,15 @@ class ItemDetailScreen extends ConsumerWidget {
                 _openRequestSheet(context, ref, item, isCloudItem: isCloudItem)
             : null,
         style: ElevatedButton.styleFrom(
-          // Tinggi minimum 54 (sama seperti sebelumnya) tetapi boleh
+          // Tinggi minimum 52 tetapi boleh
           // bertambah bila ukuran font HP diperbesar.
-          minimumSize: const Size.fromHeight(54),
-          backgroundColor: p.accent,
-          foregroundColor: p.onAccent,
-          // Abu-abu + teks gelap: kontras 5,98:1 (putih hanya 2,59:1).
-          disabledBackgroundColor: const Color(0xFF9AA39C),
-          disabledForegroundColor: const Color(0xFF1E2621),
+          minimumSize: const Size.fromHeight(52),
+          backgroundColor: p.primary,
+          foregroundColor: p.onPrimary,
+          disabledBackgroundColor: p.surfaceAlt,
+          disabledForegroundColor: p.textMuted,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         icon: Icon(icon, size: 20),
         label: Text(label,
@@ -496,8 +582,9 @@ class ItemDetailScreen extends ConsumerWidget {
     // Diambil sebelum await: SnackBar tetap tampil walaupun sheet sudah
     // ditutup pengguna saat proses berjalan.
     final messenger = AppMessenger.of(context);
+    final reasonController = TextEditingController();
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       backgroundColor: p.surface,
       // Sheet boleh lebih tinggi dan bisa di-scroll bila font diperbesar.
@@ -516,9 +603,11 @@ class ItemDetailScreen extends ConsumerWidget {
                     ref.read(firebaseRepositoryProvider).createPickupRequest(
                           itemId: item.id,
                           method: methods[selected],
+                          reason: reasonController.text,
                         ),
                     timeout: const Duration(seconds: 12),
                   );
+                  ref.invalidate(myCloudRequestForItemProvider(item.id));
                   messenger.result(outcome,
                       done: 'Pengajuan terkirim via "${methods[selected]}" 🎉 '
                           'Tunggu persetujuan pemberi.',
@@ -532,7 +621,9 @@ class ItemDetailScreen extends ConsumerWidget {
                           requesterId: user.id,
                           requesterName: user.name,
                           method: methods[selected],
-                          message: 'Halo, saya berminat dengan barang ini.',
+                          message: reasonController.text.trim().isEmpty
+                              ? 'Halo, saya berminat dengan barang ini.'
+                              : reasonController.text.trim(),
                         );
                   }
                   messenger.success(
@@ -621,6 +712,25 @@ class ItemDetailScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
+                    const SizedBox(height: 4),
+                    Text('Alasan singkat (opsional)',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: p.text)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: reasonController,
+                      enabled: !sending,
+                      maxLength: 240,
+                      maxLines: 3,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        hintText:
+                            'Ceritakan singkat kenapa kamu membutuhkan barang ini',
+                        alignLabelWithHint: true,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
@@ -670,6 +780,87 @@ class ItemDetailScreen extends ConsumerWidget {
           },
         );
       },
+    ).whenComplete(reasonController.dispose);
+  }
+}
+
+class _ItemPhotoGallery extends StatefulWidget {
+  const _ItemPhotoGallery({required this.item, required this.images});
+
+  final Item item;
+  final List<String> images;
+
+  @override
+  State<_ItemPhotoGallery> createState() => _ItemPhotoGalleryState();
+}
+
+class _ItemPhotoGalleryState extends State<_ItemPhotoGallery> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = ImageBase64.decodeOrNull(widget.images[_selectedIndex]);
+    final palette = context.palette;
+    return Column(
+      children: [
+        SizedBox(
+          height: 280,
+          width: double.infinity,
+          child: selected == null
+              ? PhotoPlaceholder(
+                  item: widget.item, height: 280, radius: 0, large: true)
+              : Image.memory(
+                  selected,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => PhotoPlaceholder(
+                      item: widget.item, height: 280, radius: 0, large: true),
+                ),
+        ),
+        Container(
+          height: 60,
+          width: double.infinity,
+          color: palette.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: widget.images.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final bytes = ImageBase64.decodeOrNull(widget.images[index]);
+              return Semantics(
+                button: true,
+                selected: index == _selectedIndex,
+                label: 'Foto ${index + 1}${index == 0 ? ', sampul' : ''}',
+                child: GestureDetector(
+                  onTap: () => setState(() => _selectedIndex = index),
+                  child: Container(
+                    width: 50,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: index == _selectedIndex
+                            ? palette.primary
+                            : palette.border,
+                        width: index == _selectedIndex ? 2 : 1,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: bytes == null
+                        ? Icon(Icons.image_outlined, color: palette.textMuted)
+                        : Image.memory(
+                            bytes,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Icon(
+                                Icons.broken_image_outlined,
+                                color: palette.textMuted),
+                          ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -682,11 +873,15 @@ class _PickupLocationSection extends ConsumerWidget {
     required this.itemId,
     required this.areaLabel,
     required this.isOwner,
+    required this.currentLatitude,
+    required this.currentLongitude,
   });
 
   final String itemId;
   final String areaLabel;
   final bool isOwner;
+  final double? currentLatitude;
+  final double? currentLongitude;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -718,6 +913,8 @@ class _PickupLocationSection extends ConsumerWidget {
     // Titik GPS hanya tersedia bagi pemilik dan peminta yang disetujui.
     final lat = fullAddress?.latitude;
     final lng = fullAddress?.longitude;
+    final profileLat = currentLatitude;
+    final profileLng = currentLongitude;
     final hasPin = lat != null && lng != null;
     final fullText = fullAddress?.address.trim() ?? '';
     final mapsQuery = fullText;
@@ -734,71 +931,85 @@ class _PickupLocationSection extends ConsumerWidget {
       }
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Semantics(
-          header: true,
-          child: Text('Lokasi Pengambilan',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w800, color: p.text)),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.location_on_outlined, size: 18, color: p.primary),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                fullAddress != null && fullAddress.address.isNotEmpty
-                    ? fullAddress.address
-                    : areaLabel.isNotEmpty
-                        ? areaLabel
-                        : 'Lokasi belum diatur',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14.5, height: 1.45, color: p.text),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: Text('Lokasi Pengambilan',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: p.text)),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.location_on_outlined, size: 18, color: p.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  fullAddress != null && fullAddress.address.isNotEmpty
+                      ? fullAddress.address
+                      : areaLabel.isNotEmpty
+                          ? areaLabel
+                          : 'Lokasi belum diatur',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14.5, height: 1.45, color: p.text),
+                ),
+              ),
+            ],
+          ),
+          if (hasPin) ...[
+            if (profileLat != null && profileLng != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Sekitar ${DistanceHelper.formatKilometers(DistanceHelper.kilometers(startLatitude: profileLat, startLongitude: profileLng, endLatitude: lat, endLongitude: lng))} dari lokasi profilmu',
+                style: TextStyle(fontSize: 12.5, color: p.textMuted),
+              ),
+            ],
+            const SizedBox(height: 10),
+            PinPreviewMap(
+              latitude: lat,
+              longitude: lng,
+              onTap: openMaps,
+              semanticLabel:
+                  'Peta titik penjemputan. Ketuk dua kali untuk membuka Google Maps',
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(note, style: TextStyle(fontSize: 12.5, color: p.textMuted)),
+          if (hasPin) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: openMaps,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: p.primary,
+                  side: BorderSide(color: p.primary),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.map_outlined, size: 19),
+                label: const Text(
+                  'Buka Titik di Google Maps',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
-        ),
-        if (hasPin) ...[
-          const SizedBox(height: 10),
-          PinPreviewMap(
-            latitude: lat,
-            longitude: lng,
-            onTap: openMaps,
-            semanticLabel:
-                'Peta titik penjemputan. Ketuk dua kali untuk membuka Google Maps',
-          ),
         ],
-        const SizedBox(height: 6),
-        Text(note, style: TextStyle(fontSize: 12.5, color: p.textMuted)),
-        if (hasPin) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: openMaps,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: p.primary,
-                side: BorderSide(color: p.primary),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              icon: const Icon(Icons.map_outlined, size: 19),
-              label: Text(
-                'Buka Titik di Google Maps',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

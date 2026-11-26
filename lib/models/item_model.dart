@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../business/address_privacy.dart';
 import '../business/image_base64.dart';
 import '../data/pickup_methods.dart';
+import 'item.dart' show ItemCondition, ListingType;
 
 // =============================================================================
 // FILE 1: item_model.dart
@@ -25,6 +26,10 @@ class ItemModel {
     this.kota = '',
     this.pickupMethods = const [],
     this.imageBase64 = '',
+    this.additionalImages = const [],
+    this.condition = ItemCondition.good,
+    this.listingType = ListingType.gratis,
+    this.price = 0,
     this.donorId = '',
     this.ownerName = 'Pengguna',
     this.status = 'available',
@@ -42,6 +47,12 @@ class ItemModel {
   /// diposting sebelum metode disimpan; gunakan [availablePickupMethods].
   final List<String> pickupMethods;
   final String imageBase64;
+
+  /// Foto selain sampul. Kosong untuk dokumen lama yang hanya punya cover.
+  final List<String> additionalImages;
+  final String condition;
+  final String listingType;
+  final int price;
   final String donorId;
   final String ownerName;
   final String status;
@@ -77,6 +88,10 @@ class ItemModel {
       kota: data['kota'] as String? ?? '',
       pickupMethods: _parsePickupMethods(data['pickupMethods']),
       imageBase64: data['imageBase64'] as String? ?? '',
+      additionalImages: _parseAdditionalImages(data['additionalImages']),
+      condition: _parseCondition(data['condition']),
+      listingType: _parseListingType(data['listingType']),
+      price: (data['price'] as num?)?.toInt() ?? 0,
       donorId: data['donorId'] as String? ?? '',
       ownerName: data['ownerName'] as String? ?? 'Pengguna',
       status: data['status'] as String? ?? 'available',
@@ -98,6 +113,50 @@ class ItemModel {
         .toSet()
         .toList(growable: false);
   }
+
+  static List<String> _parseAdditionalImages(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .take(4)
+        .toList(growable: false);
+  }
+
+  static String _parseCondition(Object? raw) =>
+      raw is String && ItemCondition.all.contains(raw)
+          ? raw
+          : ItemCondition.good;
+
+  static String _parseListingType(Object? raw) => raw == ListingType.tebusMurah
+      ? ListingType.tebusMurah
+      : ListingType.gratis;
+
+  /// Map siap disimpan Firestore. ID dokumen tetap dikelola repository.
+  /// Timestamp null dipertahankan aman untuk fixture dan data lama.
+  Map<String, dynamic> toMap() => {
+        'title': title,
+        'category': category,
+        'description': description,
+        'kelurahan': kelurahan,
+        'kota': kota,
+        'pickupMethods': pickupMethods,
+        'imageBase64': imageBase64,
+        if (additionalImages.isNotEmpty) 'additionalImages': additionalImages,
+        'condition': condition,
+        'listingType': listingType,
+        'price': price,
+        'donorId': donorId,
+        'ownerName': ownerName,
+        'status': status,
+        'createdAt': createdAt,
+      };
+
+  /// Sampul lebih dulu, diikuti foto galeri; format lama tetap satu foto.
+  List<String> get allImageBase64 => [
+        if (imageBase64.isNotEmpty) imageBase64,
+        ...additionalImages,
+      ];
 
   /// Bytes gambar untuk Image.memory; null untuk gambar kosong/rusak.
   Uint8List? get imageBytes {

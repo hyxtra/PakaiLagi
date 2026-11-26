@@ -59,47 +59,47 @@ class AppPalette extends ThemeExtension<AppPalette> {
   // dihitung dengan rumus relative luminance WCAG.
 
   static const light = AppPalette(
-    bg: Color(0xFFF6F7F4),
-    surface: Color(0xFFFFFFFF),
-    surfaceAlt: Color(0xFFE4F0E8),
-    border: Color(0xFFE2E7E1),
-    text: Color(0xFF1E2621),
-    textMuted: Color(0xFF5C6A60), // 5,3:1 di bg, 4,86:1 di surfaceAlt
-    primary: Color(0xFF2F6B4F), // 5,85:1 di bg
-    primarySoft: Color(0xFFE4F0E8),
-    onPrimary: Color(0xFFFFFFFF), // 6,29:1 di primary
-    accent: Color(0xFFE0A63C),
-    onAccent: Color(0xFF1E2621), // 7,15:1 (putih hanya 2,17:1)
-    accentText: Color(0xFF8A5A0E), // 5,02:1 di badge kategori
-    danger: Color(0xFFC0492F), // 4,61:1 di bg
+    bg: Color(0xFFF4EDE4),
+    surface: Color(0xFFFDFCFA),
+    surfaceAlt: Color(0xFFF0E4D4),
+    border: Color(0xFFDFD9CF),
+    text: Color(0xFF1C1310),
+    textMuted: Color(0xFF70635F),
+    primary: Color(0xFF2D1E18),
+    primarySoft: Color(0xFFF0E4D4),
+    onPrimary: Color(0xFFFDFCFA),
+    accent: Color(0xFFD48D31),
+    onAccent: Color(0xFF2D1E18),
+    accentText: Color(0xFF2D1E18),
+    danger: Color(0xFF9D3D2D),
     onDanger: Color(0xFFFFFFFF), // 4,96:1
-    bubbleMine: Color(0xFF2F6B4F),
-    bubbleTheirs: Color(0xFFFFFFFF),
-    statusAvailable: Color(0xFF2F6B4F), // 4,8:1 di tint
-    statusReserved: Color(0xFF8A5A00), // 5,03:1 di tint
-    statusCompleted: Color(0xFF525E56), // 5,19:1 di tint
+    bubbleMine: Color(0xFF2D1E18),
+    bubbleTheirs: Color(0xFFFDFCFA),
+    statusAvailable: Color(0xFF2D1E18),
+    statusReserved: Color(0xFF8A4B20),
+    statusCompleted: Color(0xFF70635F),
   );
 
   static const dark = AppPalette(
-    bg: Color(0xFF0F130E),
-    surface: Color(0xFF191E17),
-    surfaceAlt: Color(0x293E8F69), // hijau translusen
-    border: Color(0xFF2C3329),
-    text: Color(0xFFECF1EA),
-    textMuted: Color(0xFF9BA89F), // 6,85:1 di surface
-    primary: Color(0xFF5DBB8C), // 7,22:1 di surface
-    primarySoft: Color(0x293E8F69),
-    onPrimary: Color(0xFF0F130E), // 7,99:1 di primary
-    accent: Color(0xFFE0A63C),
-    onAccent: Color(0xFF1E2621), // 7,15:1
-    accentText: Color(0xFFE6B860), // 8,02:1 di badge kategori
-    danger: Color(0xFFE27A63), // 6,43:1 di bg
-    onDanger: Color(0xFF0F130E), // 6,43:1 (putih hanya 2,92:1)
-    bubbleMine: Color(0xFF2F6B4F), // teks putih 6,29:1
-    bubbleTheirs: Color(0xFF232A21),
-    statusAvailable: Color(0xFF5DBB8C), // 6,35:1 di tint
-    statusReserved: Color(0xFFE0A63C), // 6,82:1 di tint
-    statusCompleted: Color(0xFF9AA39C), // 5,86:1 di tint
+    bg: Color(0xFF17110F),
+    surface: Color(0xFF211916),
+    surfaceAlt: Color(0xFF33251F),
+    border: Color(0xFF493830),
+    text: Color(0xFFF4EDE4),
+    textMuted: Color(0xFFC1B2A8),
+    primary: Color(0xFFE0C4AF),
+    primarySoft: Color(0xFF33251F),
+    onPrimary: Color(0xFF211916),
+    accent: Color(0xFFD48D31),
+    onAccent: Color(0xFF2D1E18),
+    accentText: Color(0xFFF0C27D),
+    danger: Color(0xFFE7836D),
+    onDanger: Color(0xFF211916),
+    bubbleMine: Color(0xFF604333),
+    bubbleTheirs: Color(0xFF2B211D),
+    statusAvailable: Color(0xFFF0C27D),
+    statusReserved: Color(0xFFF0C27D),
+    statusCompleted: Color(0xFFC1B2A8),
   );
 
   /// Warna badge untuk status barang.
