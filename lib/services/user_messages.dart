@@ -39,10 +39,30 @@ const queuedSuffix =
 /// Mengubah exception menjadi pesan yang bisa dipahami pengguna.
 String friendlyError(Object error, {required String fallback}) {
   if (error is FirebaseAuthException) {
-    if (error.code == 'network-request-failed') {
-      return 'Tidak ada koneksi internet. Periksa koneksi lalu coba lagi.';
+    switch (error.code) {
+      case 'network-request-failed':
+        return 'Tidak ada koneksi internet. Periksa koneksi lalu coba lagi.';
+      case 'email-already-in-use':
+        return 'Email ini sudah terdaftar. Pilih Masuk atau gunakan email lain.';
+      case 'invalid-email':
+        return 'Format email tidak valid.';
+      case 'weak-password':
+        return 'Kata sandi terlalu lemah. Gunakan minimal 6 karakter.';
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Email atau kata sandi salah.';
+      case 'user-disabled':
+        return 'Akun ini dinonaktifkan. Hubungi pengelola aplikasi.';
+      case 'too-many-requests':
+        return 'Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.';
+      case 'operation-not-allowed':
+        return 'Login email/password belum diaktifkan di Firebase Console.';
+      case 'credential-already-in-use':
+        return 'Email ini sudah terhubung ke akun lain. Masuk dengan email tersebut.';
+      default:
+        return fallback;
     }
-    return fallback;
   }
   if (error is FirebaseException) {
     switch (error.code) {

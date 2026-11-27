@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/cloud_pickup_request.dart';
 import '../models/item.dart';
 import '../models/item_model.dart';
 import '../providers/cloud_item_provider.dart';
 import '../repositories/firebase_repository.dart';
+import '../router/app_router.dart';
 import '../services/user_messages.dart';
 import '../theme/app_palette.dart';
 import '../widgets/badges.dart';
@@ -93,6 +95,9 @@ class ManageRequestScreen extends ConsumerWidget {
         swatch: const Color(0xFF2F6B4F),
         pickupMethods: item.availablePickupMethods,
         address: item.areaLabel,
+        condition: item.condition,
+        listingType: item.listingType,
+        price: item.price,
         imageUrl:
             item.imageBase64.isEmpty ? null : 'base64:${item.imageBase64}',
       );
@@ -154,8 +159,36 @@ class ManageRequestScreen extends ConsumerWidget {
         ]),
         const SizedBox(height: 12),
         Text('Metode: ${request.method}', style: TextStyle(color: p.textMuted)),
+        if (request.reason.trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('Alasan: ${request.reason}',
+              style: TextStyle(color: p.text, height: 1.4)),
+        ],
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: OutlinedButton.icon(
+            onPressed: () => context.push(AppRoutes.chat(
+              item.id,
+              request.requesterName,
+              requesterId: request.requesterId,
+            )),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: p.primary,
+              side: BorderSide(color: p.border),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.chat_bubble_outline, size: 17),
+            label: Text('Chat ${request.requesterName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ),
         if (pending) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(children: [
             Expanded(
                 child: OutlinedButton(

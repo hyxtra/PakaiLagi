@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:pakailagi/models/item_model.dart';
+import 'package:pakailagi/providers/auth_provider.dart';
 import 'package:pakailagi/providers/cloud_item_provider.dart';
 import 'package:pakailagi/providers/notification_provider.dart';
 import 'package:pakailagi/screens/home_screen.dart';
@@ -23,6 +24,7 @@ final _items = [
 
 Widget app(double scale, bool empty) => ProviderScope(
       overrides: [
+        authProvider.overrideWith((ref) => AuthNotifier.forTest()),
         cloudItemsStreamProvider.overrideWith(
             (ref) => Stream.value(empty ? <ItemModel>[] : _items)),
         unreadCloudNotificationsCountProvider.overrideWith((ref) => 0),

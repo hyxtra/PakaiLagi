@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/pickup_methods.dart';
+import '../business/image_base64.dart';
 import '../business/item_ownership.dart';
 import '../business/item_status_rules.dart';
+import '../models/cloud_pickup_request.dart';
 import '../models/item.dart';
+import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_item_provider.dart';
 import '../providers/items_provider.dart';
@@ -21,6 +24,7 @@ import '../widgets/badges.dart';
 import '../widgets/photo_placeholder.dart';
 import '../widgets/pin_preview_map.dart';
 import '../widgets/progress_dialog.dart';
+import '../widgets/transaction_progress.dart';
 
 class ItemDetailScreen extends ConsumerWidget {
   const ItemDetailScreen({super.key, required this.itemId});
@@ -40,9 +44,17 @@ class ItemDetailScreen extends ConsumerWidget {
         backgroundColor: context.palette.bg,
         body: const Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) => _notFoundScaffold(context),
+      error: (_, __) => _notFoundScaffold(
+        context,
+        onRetry: () => ref.invalidate(cloudItemByIdProvider(itemId)),
+      ),
       data: (data) {
-        if (data == null) return _notFoundScaffold(context);
+        if (data == null) {
+          return _notFoundScaffold(
+            context,
+            onRetry: () => ref.invalidate(cloudItemByIdProvider(itemId)),
+          );
+        }
         return _detailScaffold(
             context,
             ref,
@@ -65,19 +77,45 @@ class ItemDetailScreen extends ConsumerWidget {
               imageUrl:
                   data.imageBytes == null ? null : 'base64:${data.imageBase64}',
             ),
-            isCloudItem: true);
+            isCloudItem: true,
+            cloudModel: data,
+            galleryBase64: data.allImageBase64);
       },
     );
   }
 
-  Scaffold _notFoundScaffold(BuildContext context) => Scaffold(
+  Scaffold _notFoundScaffold(BuildContext context, {VoidCallback? onRetry}) =>
+      Scaffold(
         backgroundColor: context.palette.bg,
         appBar: AppBar(),
-        body: const Center(child: Text('Detail barang tidak dapat dimuat')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Detail barang tidak dapat dimuat',
+                  textAlign: TextAlign.center,
+                ),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Coba lagi'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       );
 
   Widget _detailScaffold(BuildContext context, WidgetRef ref, Item item,
-      {bool isCloudItem = false}) {
+      {bool isCloudItem = false,
+      ItemModel? cloudModel,
+      List<String> galleryBase64 = const []}) {
     final p = context.palette;
     final user = ref.watch(authProvider);
     final firebaseUid = ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
@@ -98,6 +136,27 @@ class ItemDetailScreen extends ConsumerWidget {
         ? ref.watch(myCloudRequestForItemProvider(item.id)).valueOrNull
         : null;
 
+    // Bagi pemilik, ambil pengajuan yang diterima saat status reserved/completed
+    // agar timeline progress dan tombol chat peminta bisa tampil akurat.
+    CloudPickupRequest? acceptedRequest;
+    if (isCloudItem &&
+        canDeleteCloudItem &&
+        item.status != ItemStatus.available) {
+      final incoming =
+          ref.watch(cloudRequestsForItemProvider(item.id)).valueOrNull ??
+              const <CloudPickupRequest>[];
+      for (final req in incoming) {
+        if (req.status == 'accepted') {
+          acceptedRequest = req;
+          break;
+        }
+      }
+    }
+    final activeRequest = isOwner ? acceptedRequest : myRequest;
+    final showProgressTimeline = isCloudItem &&
+        ((!isOwner && myRequest != null) ||
+            (isOwner && item.status != ItemStatus.available));
+
     return Scaffold(
       backgroundColor: p.bg,
       body: Column(
@@ -108,8 +167,11 @@ class ItemDetailScreen extends ConsumerWidget {
               children: [
                 Stack(
                   children: [
-                    PhotoPlaceholder(
-                        item: item, height: 280, radius: 0, large: true),
+                    if (galleryBase64.length > 1)
+                      _ItemPhotoGallery(item: item, images: galleryBase64)
+                    else
+                      PhotoPlaceholder(
+                          item: item, height: 280, radius: 0, large: true),
                     Positioned(
                       // Area sentuh 48 dp; lingkaran tampilan tetap 40 dp,
                       // jadi posisi visualnya sama seperti sebelumnya.
@@ -141,7 +203,7 @@ class ItemDetailScreen extends ConsumerWidget {
                         header: true,
                         child: Text(item.title,
                             style: TextStyle(
-                                fontSize: 22,
+                                fontSize: 26,
                                 fontWeight: FontWeight.w800,
                                 height: 1.25,
                                 color: p.text)),
@@ -161,6 +223,18 @@ class ItemDetailScreen extends ConsumerWidget {
                               fontSize: 14.5,
                               height: 1.55,
                               color: p.textMuted)),
+                      if (showProgressTimeline) ...[
+                        const SizedBox(height: 22),
+                        TransactionProgressTimeline(
+                          steps: buildTransactionStepsWithDates(
+                            itemStatus: item.status,
+                            request: activeRequest,
+                            isOwner: isOwner,
+                            itemCreatedAt: cloudModel?.createdAt,
+                            completedAt: cloudModel?.updatedAt,
+                          ),
+                        ),
+                      ],
                       if (isCloudItem) ...[
                         const SizedBox(height: 22),
                         _PickupLocationSection(
@@ -233,15 +307,18 @@ class ItemDetailScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      // Chat hanya untuk calon penerima, bukan pemilik barang.
+                      // Chat untuk calon penerima, atau pemilik dengan peminta yang diterima.
                       if (!isOwner) ...[
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           height: 50,
                           child: OutlinedButton.icon(
-                            onPressed: () => context
-                                .push(AppRoutes.chat(item.id, item.ownerName)),
+                            onPressed: () => context.push(AppRoutes.chat(
+                              item.id,
+                              item.ownerName,
+                              requesterId: firebaseUid,
+                            )),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: p.primary,
                               side: BorderSide(color: p.primary),
@@ -253,6 +330,34 @@ class ItemDetailScreen extends ConsumerWidget {
                             label: const Text('Chat Pemberi',
                                 style: TextStyle(
                                     fontSize: 15, fontWeight: FontWeight.w800)),
+                          ),
+                        ),
+                      ] else if (acceptedRequest != null) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            onPressed: () => context.push(AppRoutes.chat(
+                              item.id,
+                              acceptedRequest!.requesterName,
+                              requesterId: acceptedRequest.requesterId,
+                            )),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: p.primary,
+                              side: BorderSide(color: p.primary),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            icon:
+                                const Icon(Icons.chat_bubble_outline, size: 19),
+                            label: Text(
+                              'Chat ${acceptedRequest.requesterName}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w800),
+                            ),
                           ),
                         ),
                       ],
@@ -278,7 +383,8 @@ class ItemDetailScreen extends ConsumerWidget {
                         width: double.infinity,
                         height: 54,
                         child: ElevatedButton.icon(
-                          onPressed: () => _confirmComplete(context, ref, item),
+                          onPressed: () => _confirmComplete(
+                              context, ref, item, acceptedRequest),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: p.primary,
                             foregroundColor: p.onPrimary,
@@ -332,7 +438,10 @@ class ItemDetailScreen extends ConsumerWidget {
 
   /// Menandai serah terima selesai (reserved -> completed), satu arah.
   Future<void> _confirmComplete(
-      BuildContext context, WidgetRef ref, Item item) async {
+      BuildContext context,
+      WidgetRef ref,
+      Item item,
+      CloudPickupRequest? acceptedRequest) async {
     final p = context.palette;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -364,6 +473,9 @@ class ItemDetailScreen extends ConsumerWidget {
                   item.id,
                   ItemStatusRules.completed,
                   from: ItemStatusRules.reserved,
+                  acceptedRequesterId: acceptedRequest?.requesterId,
+                  itemTitle: item.title,
+                  ownerName: item.ownerName,
                 )),
       );
       messenger.result(outcome,
@@ -467,16 +579,15 @@ class ItemDetailScreen extends ConsumerWidget {
                 _openRequestSheet(context, ref, item, isCloudItem: isCloudItem)
             : null,
         style: ElevatedButton.styleFrom(
-          // Tinggi minimum 54 (sama seperti sebelumnya) tetapi boleh
+          // Tinggi minimum 52 tetapi boleh
           // bertambah bila ukuran font HP diperbesar.
-          minimumSize: const Size.fromHeight(54),
-          backgroundColor: p.accent,
-          foregroundColor: p.onAccent,
-          // Abu-abu + teks gelap: kontras 5,98:1 (putih hanya 2,59:1).
-          disabledBackgroundColor: const Color(0xFF9AA39C),
-          disabledForegroundColor: const Color(0xFF1E2621),
+          minimumSize: const Size.fromHeight(52),
+          backgroundColor: p.primary,
+          foregroundColor: p.onPrimary,
+          disabledBackgroundColor: p.surfaceAlt,
+          disabledForegroundColor: p.textMuted,
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         icon: Icon(icon, size: 20),
         label: Text(label,
@@ -674,6 +785,87 @@ class ItemDetailScreen extends ConsumerWidget {
   }
 }
 
+class _ItemPhotoGallery extends StatefulWidget {
+  const _ItemPhotoGallery({required this.item, required this.images});
+
+  final Item item;
+  final List<String> images;
+
+  @override
+  State<_ItemPhotoGallery> createState() => _ItemPhotoGalleryState();
+}
+
+class _ItemPhotoGalleryState extends State<_ItemPhotoGallery> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = ImageBase64.decodeOrNull(widget.images[_selectedIndex]);
+    final palette = context.palette;
+    return Column(
+      children: [
+        SizedBox(
+          height: 280,
+          width: double.infinity,
+          child: selected == null
+              ? PhotoPlaceholder(
+                  item: widget.item, height: 280, radius: 0, large: true)
+              : Image.memory(
+                  selected,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => PhotoPlaceholder(
+                      item: widget.item, height: 280, radius: 0, large: true),
+                ),
+        ),
+        Container(
+          height: 60,
+          width: double.infinity,
+          color: palette.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: widget.images.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final bytes = ImageBase64.decodeOrNull(widget.images[index]);
+              return Semantics(
+                button: true,
+                selected: index == _selectedIndex,
+                label: 'Foto ${index + 1}${index == 0 ? ', sampul' : ''}',
+                child: GestureDetector(
+                  onTap: () => setState(() => _selectedIndex = index),
+                  child: Container(
+                    width: 50,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: index == _selectedIndex
+                            ? palette.primary
+                            : palette.border,
+                        width: index == _selectedIndex ? 2 : 1,
+                      ),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: bytes == null
+                        ? Icon(Icons.image_outlined, color: palette.textMuted)
+                        : Image.memory(
+                            bytes,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Icon(
+                                Icons.broken_image_outlined,
+                                color: palette.textMuted),
+                          ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Lokasi pengambilan dengan aturan privasi:
 /// - semua pengguna: kelurahan & kota
 /// - pemilik & peminta yang pengajuannya diterima: alamat lengkap
@@ -734,71 +926,79 @@ class _PickupLocationSection extends ConsumerWidget {
       }
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Semantics(
-          header: true,
-          child: Text('Lokasi Pengambilan',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w800, color: p.text)),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.location_on_outlined, size: 18, color: p.primary),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                fullAddress != null && fullAddress.address.isNotEmpty
-                    ? fullAddress.address
-                    : areaLabel.isNotEmpty
-                        ? areaLabel
-                        : 'Lokasi belum diatur',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 14.5, height: 1.45, color: p.text),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: Text('Lokasi Pengambilan',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: p.text)),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.location_on_outlined, size: 18, color: p.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  fullAddress != null && fullAddress.address.isNotEmpty
+                      ? fullAddress.address
+                      : areaLabel.isNotEmpty
+                          ? areaLabel
+                          : 'Lokasi belum diatur',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14.5, height: 1.45, color: p.text),
+                ),
+              ),
+            ],
+          ),
+          if (hasPin) ...[
+            const SizedBox(height: 10),
+            PinPreviewMap(
+              latitude: lat,
+              longitude: lng,
+              onTap: openMaps,
+              semanticLabel:
+                  'Peta titik penjemputan. Ketuk dua kali untuk membuka Google Maps',
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(note, style: TextStyle(fontSize: 12.5, color: p.textMuted)),
+          if (hasPin) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: openMaps,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: p.primary,
+                  side: BorderSide(color: p.primary),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.map_outlined, size: 19),
+                label: const Text(
+                  'Buka Titik di Google Maps',
+                  style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
-        ),
-        if (hasPin) ...[
-          const SizedBox(height: 10),
-          PinPreviewMap(
-            latitude: lat,
-            longitude: lng,
-            onTap: openMaps,
-            semanticLabel:
-                'Peta titik penjemputan. Ketuk dua kali untuk membuka Google Maps',
-          ),
         ],
-        const SizedBox(height: 6),
-        Text(note, style: TextStyle(fontSize: 12.5, color: p.textMuted)),
-        if (hasPin) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: openMaps,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: p.primary,
-                side: BorderSide(color: p.primary),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              icon: const Icon(Icons.map_outlined, size: 19),
-              label: Text(
-                'Buka Titik di Google Maps',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

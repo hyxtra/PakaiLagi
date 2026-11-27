@@ -1,47 +1,49 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chat_message.dart';
+import '../repositories/firebase_repository.dart';
+import '../services/firebase_auth_service.dart';
 
-/// Menyimpan riwayat chat per barang (key = itemId) selama sesi berjalan.
-class ChatNotifier extends StateNotifier<Map<String, List<ChatMessage>>> {
-  ChatNotifier() : super({});
+// =============================================================================
+// chat_provider.dart
+// Provider Riverpod berbasis Cloud Firestore untuk fitur Chat & Inbox.
+// Memantau firebaseAuthStateProvider agar pergantian akun otomatis membatalkan
+// stream akun lama dan memuat percakapan akun baru.
+// =============================================================================
 
-  /// Inisialisasi thread bila belum ada. [requesterIsMe] menentukan sisi
-  /// pengirim kartu barang + pesan pembuka.
-  void ensureThread({
-    required String itemId,
-    required String itemTitle,
-    required bool requesterIsMe,
-  }) {
-    if (state.containsKey(itemId)) return;
-    state = {
-      ...state,
-      itemId: [
-        ChatMessage(fromMe: requesterIsMe, isItemCard: true, time: '09:40'),
-        ChatMessage(
-          fromMe: requesterIsMe,
-          text: 'Halo, saya ingin meminta barang ini: $itemTitle. Apakah masih tersedia? 🙏',
-          time: '09:41',
-        ),
-        ChatMessage(
-          fromMe: !requesterIsMe,
-          text: 'Halo! Masih ada kok. Silakan ajukan pengambilannya ya 🙂',
-          time: '09:43',
-        ),
-      ],
-    };
-  }
+/// Daftar seluruh percakapan user Firebase aktif, terbaru di urutan teratas.
+final chatThreadsProvider = StreamProvider<List<ChatThread>>((ref) {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) return Stream.value(const []);
+  return ref.watch(firebaseRepositoryProvider).getMyChatThreads(firebaseUser.uid);
+});
 
-  void send(String itemId, String text) {
-    final now = DateTime.now();
-    final time =
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final thread = List<ChatMessage>.of(state[itemId] ?? const []);
-    thread.add(ChatMessage(fromMe: true, text: text, time: time));
-    state = {...state, itemId: thread};
-  }
-}
+/// Detail metadata satu room chat `{itemId}_{requesterId}`.
+/// Bernilai null bila percakapan belum pernah dimulai.
+final chatThreadByIdProvider =
+    StreamProvider.autoDispose.family<ChatThread?, String>((ref, chatId) {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) return Stream.value(null);
+  return ref.watch(firebaseRepositoryProvider).getChatThreadById(chatId);
+});
 
-final chatProvider =
-    StateNotifierProvider<ChatNotifier, Map<String, List<ChatMessage>>>(
-        (ref) => ChatNotifier());
+/// Stream pesan realtime di dalam satu room chat.
+final chatMessagesProvider =
+    StreamProvider.autoDispose.family<List<ChatMessage>, String>((ref, chatId) {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) return Stream.value(const []);
+  return ref
+      .watch(firebaseRepositoryProvider)
+      .getChatMessages(chatId, currentUserId: firebaseUser.uid);
+});
+
+/// Total pesan belum dibaca di seluruh percakapan user aktif (badge nav bar).
+final unreadCountProvider = Provider<int>((ref) {
+  final uid = ref.watch(currentFirebaseUidProvider);
+  if (uid == null) return 0;
+  return ref.watch(chatThreadsProvider).maybeWhen(
+        data: (threads) =>
+            threads.fold<int>(0, (sum, t) => sum + t.unreadFor(uid)),
+        orElse: () => 0,
+      );
+});

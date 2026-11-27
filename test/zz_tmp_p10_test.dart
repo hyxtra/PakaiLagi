@@ -40,23 +40,31 @@ void main() {
     });
 
     test('hanya metode yang dipilih pemberi yang tersedia', () {
-      final m = ItemModel.fromMap(
-          {...base(), 'pickupMethods': ['Bertemu (COD)']},
-          id: 'a');
-      expect(m.availablePickupMethods, ['Bertemu (COD)']);
+      final m = ItemModel.fromMap({
+        ...base(),
+        'pickupMethods': const ['Bertemu (COD)']
+      }, id: 'a');
+      expect(m.availablePickupMethods, const ['Bertemu (COD)']);
     });
 
     test('nama tak dikenal (termasuk Ambil Sendiri) dibuang', () {
       final m = ItemModel.fromMap({
         ...base(),
-        'pickupMethods': ['Ambil Sendiri', 'Antar ke Alamat', 'Antar ke Alamat']
+        'pickupMethods': const [
+          'Ambil Sendiri',
+          'Antar ke Alamat',
+          'Antar ke Alamat'
+        ]
       }, id: 'a');
-      expect(m.availablePickupMethods, ['Antar ke Alamat']);
+      expect(m.availablePickupMethods, const ['Antar ke Alamat']);
     });
 
     test('semua tak dikenal / tipe salah -> dianggap barang lama', () {
       expect(
-          ItemModel.fromMap({...base(), 'pickupMethods': ['Kurir']}, id: 'a')
+          ItemModel.fromMap({
+            ...base(),
+            'pickupMethods': const ['Kurir']
+          }, id: 'a')
               .availablePickupMethods,
           kPickupMethodNames);
       expect(
@@ -65,8 +73,10 @@ void main() {
               .availablePickupMethods,
           kPickupMethodNames);
       expect(
-          ItemModel.fromMap({...base(), 'pickupMethods': [1, null, 2]},
-                  id: 'a')
+          ItemModel.fromMap({
+            ...base(),
+            'pickupMethods': const [1, null, 2]
+          }, id: 'a')
               .availablePickupMethods,
           kPickupMethodNames);
     });

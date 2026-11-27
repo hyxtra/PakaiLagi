@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pakailagi/models/item.dart';
 import 'package:pakailagi/notifiers/item_notifier.dart';
 import 'package:pakailagi/notifiers/item_state.dart';
+import 'package:pakailagi/providers/auth_provider.dart';
 import 'package:pakailagi/providers/cloud_item_provider.dart';
 import 'package:pakailagi/repositories/item_repository.dart';
 import 'package:pakailagi/screens/post_item_screen.dart';
@@ -34,6 +35,7 @@ Widget _buildTestAppWithState(PostItemState initialState) {
   final notifier = _FakePostItemNotifier(initialState);
   return ProviderScope(
     overrides: [
+      authProvider.overrideWith((ref) => AuthNotifier.forTest()),
       postItemNotifierProvider.overrideWith((_) => notifier),
       // Override cloudItemNotifier langsung dengan state Idle
       // agar test tidak butuh Firebase dependency.

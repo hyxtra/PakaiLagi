@@ -5,13 +5,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 import 'package:pakailagi/models/app_user.dart';
 import 'package:pakailagi/models/item.dart';
 import 'package:pakailagi/notifiers/item_notifier.dart';
 import 'package:pakailagi/notifiers/item_state.dart';
+import 'package:pakailagi/providers/auth_provider.dart';
 import 'package:pakailagi/providers/cloud_item_provider.dart';
 import 'package:pakailagi/repositories/item_repository.dart';
 import 'package:pakailagi/screens/post_item_screen.dart';
@@ -59,6 +59,15 @@ class _CountingNotifier extends StateNotifier<PublishState>
 
 class _FakePicker extends ImagePickerPlatform {
   @override
+  Future<List<XFile>> getMultiImageWithOptions({
+    MultiImagePickerOptions options = const MultiImagePickerOptions(),
+  }) async =>
+      [
+        XFile.fromData(Uint8List.fromList([1, 2, 3]),
+            path: '/data/cache/hilang/foto.jpg'),
+      ];
+
+  @override
   Future<XFile?> getImageFromSource({
     required ImageSource source,
     ImagePickerOptions options = const ImagePickerOptions(),
@@ -90,6 +99,7 @@ void main() {
     final counting = _CountingNotifier();
     await t.pumpWidget(ProviderScope(
       overrides: [
+        authProvider.overrideWith((ref) => AuthNotifier.forTest()),
         postItemNotifierProvider.overrideWith((_) => _FakeNotifier(
             const PostItemLoaded(categories: [Category('Pakaian', '👕')]))),
         cloudItemNotifierProvider.overrideWith((ref) => counting),
@@ -108,22 +118,24 @@ void main() {
     await t.tap(find.text('Pilih dari Galeri'));
     await t.pumpAndSettle();
     // Image.file membaca berkas lewat I/O asli; beri waktu di luar jam palsu.
-    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await t.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 300)));
     await t.pump();
     await t.pump(const Duration(milliseconds: 100));
-    expect(find.text('Foto tidak dapat ditampilkan. Ketuk untuk memilih ulang.'),
+    expect(
+        find.text('Foto tidak dapat ditampilkan. Ketuk untuk memilih ulang.'),
         findsOneWidget,
         reason: 'errorBuilder pratinjau foto harus tampil, bukan layar error');
     expect(t.takeException(), isNull);
 
     // 2) Isi form.
-    Finder byHint(String s) => find.byWidgetPredicate((w) =>
-        w is TextField && (w.decoration?.hintText ?? '').startsWith(s));
+    Finder byHint(String s) => find.byWidgetPredicate(
+        (w) => w is TextField && (w.decoration?.hintText ?? '').startsWith(s));
     await t.enterText(byHint('Mis. Meja'), 'Meja belajar');
     await t.tap(find.textContaining('Pakaian'));
     await t.pump();
-    await t.dragUntilVisible(
-        find.text('Deskripsi'), find.byType(ListView).first, const Offset(0, -200));
+    await t.dragUntilVisible(find.text('Deskripsi'),
+        find.byType(ListView).first, const Offset(0, -200));
     await t.enterText(byHint('Ceritakan'), 'Masih bagus dan kokoh');
     await t.dragUntilVisible(find.textContaining('Bertemu (COD)'),
         find.byType(ListView).first, const Offset(0, -200));
@@ -155,7 +167,8 @@ void main() {
     await t.pump(const Duration(milliseconds: 500));
     await t.pump(const Duration(milliseconds: 500));
     // ignore: avoid_print
-    print('[HASIL] SnackBar ditemukan: ${find.byType(SnackBar).evaluate().length}, teks sukses: ${find.text('Barang berhasil diposting!').evaluate().length}');
+    print(
+        '[HASIL] SnackBar ditemukan: ${find.byType(SnackBar).evaluate().length}, teks sukses: ${find.text('Barang berhasil diposting!').evaluate().length}');
     expect(find.text('Barang berhasil diposting!'), findsOneWidget);
     final bar = t.widget<SnackBar>(find.byType(SnackBar));
     expect(bar.backgroundColor, AppPalette.light.primary);

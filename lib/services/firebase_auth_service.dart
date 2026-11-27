@@ -3,17 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 // =============================================================================
 // firebase_auth_service.dart
-// Service layer untuk autentikasi Firebase — 100% Cloud-only.
+// Service layer untuk Firebase Authentication.
 //
 // TANGGUNG JAWAB:
-//   - Login anonim (signInAnonymously) → mendapatkan uid unik
-//   - Sign out dari Firebase
-//   - Menyediakan uid untuk operasi Firestore (donorId)
+//   - Daftar/masuk dengan email dan kata sandi
+//   - Menautkan sesi anonim lama saat pendaftaran agar UID dan barangnya tetap
+//   - Menyediakan UID Firebase untuk kepemilikan data Firestore
 //
-// MENGAPA ANONYMOUS AUTH?
-//   Pada tahap development/testing, kita hanya butuh uid unik untuk menandai
-//   siapa pemilik barang (donorId). Anonymous auth adalah cara tercepat tanpa
-//   perlu form registrasi email/password.
+// Sesi anonim tetap didukung untuk data lama dan bisa ditautkan ke akun baru.
 //
 // DIPAKAI OLEH: FirebaseRepository (untuk donorId saat publishItem)
 // =============================================================================
@@ -38,6 +35,45 @@ class FirebaseAuthService {
       throw Exception('Gagal login anonim: ${e.message}');
     }
   }
+
+  /// Daftar akun email/password. Jika sesi anonim lama masih aktif, tautkan
+  /// kredensial supaya UID dan barang yang sudah diposting tetap sama.
+  Future<User> registerWithEmail({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    final credential = EmailAuthProvider.credential(
+      email: email.trim(),
+      password: password,
+    );
+    final current = _auth.currentUser ?? await _auth.authStateChanges().first;
+    final user = current?.isAnonymous == true
+        ? (await current!.linkWithCredential(credential)).user!
+        : (await _auth.createUserWithEmailAndPassword(
+                email: email.trim(), password: password))
+            .user!;
+    await user.updateDisplayName(name.trim());
+    return user;
+  }
+
+  /// Masuk ke akun Firebase yang sudah terdaftar dengan email/password.
+  Future<User> signInWithEmail({
+    required String email,
+    required String password,
+  }) async {
+    final credential = await _auth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+    final user = credential.user;
+    if (user == null) throw Exception('Akun Firebase tidak ditemukan.');
+    return user;
+  }
+
+  /// Menunggu Firebase memulihkan sesi yang tersimpan tanpa membuat sesi baru.
+  Future<User?> restoreUser() async =>
+      _auth.currentUser ?? await _auth.authStateChanges().first;
 
   /// Memastikan ada sesi Firebase sebelum mengakses Firestore.
   ///
@@ -97,4 +133,9 @@ final firebaseAuthServiceProvider = Provider<FirebaseAuthService>((ref) {
 final firebaseAuthStateProvider = StreamProvider<User?>((ref) {
   final authService = ref.watch(firebaseAuthServiceProvider);
   return authService.authStateChanges;
+});
+
+/// UID akun Firebase aktif saat ini (null bila belum login).
+final currentFirebaseUidProvider = Provider<String?>((ref) {
+  return ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
 });

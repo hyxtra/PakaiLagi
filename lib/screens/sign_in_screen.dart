@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/auth_provider.dart';
+import '../services/user_messages.dart';
 import '../widgets/progress_dialog.dart';
 import '../theme/app_palette.dart';
 import '../widgets/accessible_tap.dart';
@@ -21,37 +22,104 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// Setelah submit pertama, error diperbarui langsung saat pengguna mengetik
   /// sehingga ia tahu kapan isiannya sudah benar.
   bool _submitted = false;
+  bool _isSubmitting = false;
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _nameFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
 
   @override
   void dispose() {
     _name.dispose();
     _email.dispose();
     _password.dispose();
+    _nameFocus.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    FocusScope.of(context).unfocus();
+  static final _emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+
+  void _focusFirstInvalidField() {
+    final FocusNode target;
+    if (!_masuk && _name.text.trim().isEmpty) {
+      target = _nameFocus;
+    } else {
+      final email = _email.text.trim();
+      if (email.isEmpty || !_emailRegex.hasMatch(email)) {
+        target = _emailFocus;
+      } else {
+        target = _passwordFocus;
+      }
+    }
+    // Langsung minta fokus tanpa unfocus() terlebih dahulu agar keyboard tidak
+    // menutup lalu membuka kembali sendiri saat validasi gagal.
+    if (!target.hasFocus) {
+      target.requestFocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = target.context;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 200),
+          alignment: 0.3,
+        );
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
+    final isLogin = _masuk;
     setState(() => _submitted = true);
     if (!_formKey.currentState!.validate()) {
-      AppMessenger.of(context)
-          .error('Periksa kembali isian yang ditandai merah.');
+      // Pertahankan/kembalikan fokus ke isian bermasalah (mis. kata sandi < 6
+      // karakter) dan jangan tampilkan SnackBar mengambang di atas keyboard
+      // yang dapat menghalangi field saat pengguna langsung mengetik lanjutan.
+      _focusFirstInvalidField();
       return;
     }
+    FocusScope.of(context).unfocus();
     // Diambil sebelum signIn: setelah login router berpindah ke Beranda dan
     // layar ini ditutup. ScaffoldMessenger milik MaterialApp, jadi SnackBar
     // tetap tampil di Beranda.
     final messenger = AppMessenger.of(context);
-    ref
-        .read(authProvider.notifier)
-        .signIn(name: _name.text, email: _email.text);
-    final name = ref.read(authProvider)?.firstName ?? '';
-    messenger.success(_masuk
-        ? 'Berhasil masuk. Halo, $name!'
-        : 'Akun berhasil dibuat. Selamat datang, $name!');
+    setState(() => _isSubmitting = true);
+    try {
+      final notifier = ref.read(authProvider.notifier);
+      if (isLogin) {
+        await notifier.signIn(
+          email: _email.text,
+          password: _password.text,
+        );
+      } else {
+        await notifier.register(
+          name: _name.text,
+          email: _email.text,
+          password: _password.text,
+        );
+      }
+      if (!mounted) return;
+      final name = ref.read(authProvider)?.firstName ?? '';
+      messenger.success(isLogin
+          ? 'Berhasil masuk. Halo, $name!'
+          : 'Akun Firebase berhasil dibuat. Selamat datang, $name!');
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        messenger,
+        friendlyError(error,
+            fallback: 'Gagal ${isLogin ? 'masuk' : 'membuat akun'}. Coba lagi.'),
+        isError: true,
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   @override
@@ -61,27 +129,36 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       backgroundColor: p.bg,
       body: SafeArea(
         child: SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(24, 48, 24, 32),
           child: Form(
             key: _formKey,
             autovalidateMode: _submitted
                 ? AutovalidateMode.onUserInteraction
                 : AutovalidateMode.disabled,
-            child: AutofillGroup(
-              child: Column(
-                children: [
+            child: Column(
+              children: [
                   // Brand
                   ExcludeSemantics(
                     child: Container(
-                      width: 72,
-                      height: 72,
+                      width: 84,
+                      height: 84,
                       decoration: BoxDecoration(
-                        color: p.primary,
                         borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: p.primary.withValues(alpha: 0.16),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                      alignment: Alignment.center,
-                      child: const Text('♻️', style: TextStyle(fontSize: 36)),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(22),
+                        child: Image.asset(
+                          'assets/logo/pakailagi_logo.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -121,20 +198,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   if (!_masuk)
                     _field(
                       controller: _name,
+                      focusNode: _nameFocus,
                       hint: 'Nama lengkap',
                       icon: Icons.person_outline,
                       textCapitalization: TextCapitalization.words,
-                      autofillHints: const [AutofillHints.name],
                       validator: (v) => (v == null || v.trim().isEmpty)
                           ? 'Nama wajib diisi'
                           : null,
                     ),
                   _field(
                     controller: _email,
+                    focusNode: _emailFocus,
                     hint: 'Email',
                     icon: Icons.mail_outline,
                     keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) {
                         return 'Email wajib diisi';
@@ -146,10 +223,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   ),
                   _field(
                     controller: _password,
+                    focusNode: _passwordFocus,
                     hint: 'Kata sandi',
                     icon: Icons.lock_outline,
                     obscure: _obscurePassword,
-                    autofillHints: const [AutofillHints.password],
                     // Field terakhir: tombol keyboard "Selesai" langsung
                     // mengirim form.
                     textInputAction: TextInputAction.done,
@@ -192,16 +269,25 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton(
-                      onPressed: _submit,
+                      onPressed: _isSubmitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: p.accent,
                         foregroundColor: p.onAccent,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
-                      child: Text(_masuk ? 'Masuk' : 'Buat Akun',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w800)),
+                      child: _isSubmitting
+                          ? SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: p.onAccent,
+                              ),
+                            )
+                          : Text(_masuk ? 'Masuk' : 'Buat Akun',
+                              style: const TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -216,15 +302,19 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _modeTab(String label, bool active) {
     final p = context.palette;
     return Expanded(
       child: AccessibleTap(
-        onTap: () => setState(() => _masuk = label == 'Masuk'),
+        onTap: _isSubmitting
+            ? null
+            : () => setState(() {
+                  _masuk = label == 'Masuk';
+                  _submitted = false;
+                }),
         label: label == 'Masuk' ? 'Mode masuk' : 'Mode daftar akun baru',
         selected: active,
         radio: true,
@@ -251,13 +341,13 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
   Widget _field({
     required TextEditingController controller,
+    FocusNode? focusNode,
     required String hint,
     required IconData icon,
     bool obscure = false,
     TextInputType? keyboardType,
     TextInputAction textInputAction = TextInputAction.next,
     TextCapitalization textCapitalization = TextCapitalization.none,
-    Iterable<String>? autofillHints,
     ValueChanged<String>? onSubmitted,
     Widget? suffix,
     String? Function(String?)? validator,
@@ -267,13 +357,16 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
+        focusNode: focusNode,
         obscureText: obscure,
         keyboardType: keyboardType,
         // "Next" memindahkan fokus ke field berikutnya tanpa menutup keyboard.
         textInputAction: textInputAction,
         textCapitalization: textCapitalization,
-        autofillHints: autofillHints,
         onFieldSubmitted: onSubmitted,
+        // Jika onSubmitted diberikan (mis. TextInputAction.done), cegah
+        // auto-unfocus bawaan agar keyboard tidak menutup-buka saat validasi gagal.
+        onEditingComplete: onSubmitted != null ? () {} : null,
         // Ruang ekstra agar teks error di bawah field ikut terlihat di atas
         // keyboard saat field difokuskan.
         scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),

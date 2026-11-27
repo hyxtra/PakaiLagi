@@ -10,6 +10,7 @@ import '../models/item_model.dart';
 import '../models/app_user.dart';
 import '../models/cloud_pickup_request.dart';
 import '../models/cloud_notification.dart';
+import '../models/chat_message.dart';
 import '../business/image_base64.dart';
 import '../business/item_status_rules.dart';
 
@@ -47,9 +48,15 @@ class FirebaseRepository {
   static const String _requestsCollection = 'pickupRequests';
   static const String _profilesCollection = 'profiles';
   static const String _notificationsCollection = 'notifications';
+  static const String _chatsCollection = 'chats';
+  static const String _messagesCollection = 'messages';
 
   /// ID dokumen pengajuan untuk pasangan barang + peminta.
   static String requestIdFor(String itemId, String requesterId) =>
+      '${itemId}_$requesterId';
+
+  /// ID dokumen room chat untuk pasangan barang + peminta.
+  static String chatIdFor(String itemId, String requesterId) =>
       '${itemId}_$requesterId';
 
   DocumentReference<Map<String, dynamic>> _locationRef(String itemId) =>
@@ -91,16 +98,35 @@ class FirebaseRepository {
     required List<String> pickupMethods,
     double? latitude,
     double? longitude,
+    List<Uint8List> additionalImageBytes = const [],
+    String condition = 'Layak Pakai',
+    String listingType = 'gratis',
+    int price = 0,
   }) async {
     // Cek ukuran SEBELUM mengirim: server menolak foto yang lewat batas dengan
     // pesan "Akses ditolak", yang menyesatkan pengguna.
-    if (!ImageBase64.fitsFirestoreLimit(imageBytes.length)) {
-      final kb = (imageBytes.length / 1024).round();
-      throw Exception('Foto terlalu besar ($kb KB). Ambil ulang foto atau '
-          'pilih foto dengan ukuran lebih kecil.');
+    final allPhotoBytes = [imageBytes, ...additionalImageBytes];
+    if (allPhotoBytes.length > ImageBase64.maxPhotoCount) {
+      throw Exception('Pilih maksimal 5 foto barang.');
+    }
+    final encodedLength = allPhotoBytes.fold<int>(
+        0, (total, bytes) => total + ImageBase64.encodedLength(bytes.length));
+    final hasMultiplePhotos = allPhotoBytes.length > 1;
+    final photoTooLarge = hasMultiplePhotos
+        ? allPhotoBytes.any((bytes) =>
+            ImageBase64.encodedLength(bytes.length) >=
+            ImageBase64.maxPhotoEncodedLength)
+        : !ImageBase64.fitsFirestoreLimit(imageBytes.length);
+    if (photoTooLarge ||
+        (hasMultiplePhotos &&
+            encodedLength > ImageBase64.maxGalleryEncodedLength)) {
+      throw Exception('Ukuran foto terlalu besar untuk diunggah bersama. '
+          'Pilih foto lain atau kurangi jumlah foto.');
     }
     final donorId = (await _authService.ensureSignedIn()).uid;
-    final imageBase64 = await _encodeBytesToBase64(imageBytes);
+    final encodedPhotos =
+        await Future.wait(allPhotoBytes.map(_encodeBytesToBase64));
+    final imageBase64 = encodedPhotos.first;
 
     final itemRef = _firestore.collection(_itemsCollection).doc();
     final batch = _firestore.batch();
@@ -109,11 +135,16 @@ class FirebaseRepository {
       'category': category,
       'description': description,
       'imageBase64': imageBase64,
+      if (encodedPhotos.length > 1)
+        'additionalImages': encodedPhotos.skip(1).toList(growable: false),
       'donorId': donorId,
       'ownerName': ownerName,
       'kelurahan': kelurahan,
       'kota': kota,
       'pickupMethods': pickupMethods,
+      'condition': condition,
+      'listingType': listingType,
+      'price': price,
       'status': ItemStatusRules.available,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -185,7 +216,16 @@ class FirebaseRepository {
   ///
   /// Bila [from] diberikan, perubahannya harus transisi yang sah menurut
   /// [ItemStatusRules.canTransition] (mis. reserved -> completed).
-  Future<void> updateItemStatus(String itemId, String status, {String? from}) {
+  /// Saat barang dinyatakan selesai, penerima yang disetujui ikut diberi
+  /// notifikasi di latar belakang.
+  Future<void> updateItemStatus(
+    String itemId,
+    String status, {
+    String? from,
+    String? acceptedRequesterId,
+    String? itemTitle,
+    String? ownerName,
+  }) async {
     if (!ItemStatusRules.isValid(status)) {
       throw ArgumentError.value(status, 'status', 'Status item tidak valid');
     }
@@ -194,10 +234,30 @@ class FirebaseRepository {
       throw Exception('Perubahan status dari "$from" ke "$status" tidak '
           'diizinkan.');
     }
-    return _firestore
+    await _firestore
         .collection(_itemsCollection)
         .doc(itemId)
         .update({'status': status, 'updatedAt': FieldValue.serverTimestamp()});
+
+    if (status == ItemStatusRules.completed &&
+        acceptedRequesterId != null &&
+        acceptedRequesterId.isNotEmpty) {
+      final title = (itemTitle != null && itemTitle.isNotEmpty)
+          ? itemTitle
+          : 'barang';
+      unawaited(_firestore
+          .collection(_notificationsCollection)
+          .add(_notificationData(
+            recipientId: acceptedRequesterId,
+            senderName: (ownerName != null && ownerName.isNotEmpty)
+                ? ownerName
+                : 'Pemberi barang',
+            title: 'Serah terima selesai',
+            body: 'Transaksi untuk "$title" telah dinyatakan selesai.',
+            itemId: itemId,
+          ))
+          .then<void>((_) {}, onError: (Object _) {}));
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -207,6 +267,7 @@ class FirebaseRepository {
   Future<void> createPickupRequest({
     required String itemId,
     required String method,
+    String reason = '',
   }) async {
     final requesterId = (await _authService.ensureSignedIn()).uid;
     final item =
@@ -245,6 +306,7 @@ class FirebaseRepository {
         'requesterId': requesterId,
         'requesterName': requesterName,
         'method': method,
+        if (reason.trim().isNotEmpty) 'reason': reason.trim(),
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       })
@@ -270,6 +332,47 @@ class FirebaseRepository {
             .map((doc) => doc.data()['itemId'] as String? ?? '')
             .where((itemId) => itemId.isNotEmpty)
             .toList());
+  }
+
+  /// Seluruh pengajuan yang pernah dibuat [requesterId] (pending, diterima,
+  /// ditolak), diurutkan dari yang terbaru di klien agar tidak butuh composite index.
+  Stream<List<CloudPickupRequest>> getMyOutgoingRequests(String requesterId) {
+    return _firestore
+        .collection(_requestsCollection)
+        .where('requesterId', isEqualTo: requesterId)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs.map(CloudPickupRequest.fromFirestore).toList();
+      list.sort((a, b) {
+        final ta = a.decidedAt ?? a.createdAt;
+        final tb = b.decidedAt ?? b.createdAt;
+        if (ta == null && tb == null) return 0;
+        if (ta == null) return -1;
+        if (tb == null) return 1;
+        return tb.compareTo(ta);
+      });
+      return list;
+    });
+  }
+
+  /// Seluruh pengajuan yang masuk untuk barang-barang milik [ownerId].
+  Stream<List<CloudPickupRequest>> getRequestsForOwner(String ownerId) {
+    return _firestore
+        .collection(_requestsCollection)
+        .where('ownerId', isEqualTo: ownerId)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs.map(CloudPickupRequest.fromFirestore).toList();
+      list.sort((a, b) {
+        final ta = a.decidedAt ?? a.createdAt;
+        final tb = b.decidedAt ?? b.createdAt;
+        if (ta == null && tb == null) return 0;
+        if (ta == null) return -1;
+        if (tb == null) return 1;
+        return tb.compareTo(ta);
+      });
+      return list;
+    });
   }
 
   /// Pengajuan milik peminta untuk satu barang (null jika belum mengajukan).
@@ -443,6 +546,24 @@ class FirebaseRepository {
     );
   }
 
+  /// Profil satu kali baca saat sesi email/password dipulihkan atau masuk.
+  Future<AppUser?> getMyProfileOnce(String uid) async {
+    final doc = await _firestore.collection(_profilesCollection).doc(uid).get();
+    final data = doc.data();
+    if (data == null) return null;
+    return AppUser(
+      id: doc.id,
+      name: data['name'] as String? ?? 'Pengguna',
+      email: data['email'] as String? ?? '',
+      phone: data['phone'] as String? ?? '',
+      address: data['address'] as String? ?? '',
+      kelurahan: data['kelurahan'] as String? ?? '',
+      kota: data['kota'] as String? ?? '',
+      latitude: (data['latitude'] as num?)?.toDouble(),
+      longitude: (data['longitude'] as num?)?.toDouble(),
+    );
+  }
+
   /// Menyimpan profil pada dokumen yang identik dengan Firebase UID.
   /// Koordinat yang null dihapus dari dokumen agar tidak tertinggal koordinat
   /// lama yang tidak cocok dengan alamat baru.
@@ -469,6 +590,142 @@ class FirebaseRepository {
       'longitude': longitude ?? FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  // ---------------------------------------------------------------------------
+  // CHAT REALTIME (Firestore)
+  // ---------------------------------------------------------------------------
+
+  /// Daftar seluruh thread percakapan yang diikuti [uid], diurutkan pesan
+  /// terbaru paling atas di sisi klien agar tidak butuh composite index.
+  Stream<List<ChatThread>> getMyChatThreads(String uid) {
+    return _firestore
+        .collection(_chatsCollection)
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs.map(ChatThread.fromFirestore).toList();
+      list.sort((a, b) {
+        final ta = a.lastMessageAt;
+        final tb = b.lastMessageAt;
+        if (ta == null && tb == null) return 0;
+        if (ta == null) return -1; // write lokal belum dikonfirmasi -> atas
+        if (tb == null) return 1;
+        return tb.compareTo(ta);
+      });
+      return list;
+    });
+  }
+
+  /// Stream satu dokumen room chat. Mengembalikan null bila percakapan belum dimulai.
+  Stream<ChatThread?> getChatThreadById(String chatId) {
+    return _firestore
+        .collection(_chatsCollection)
+        .doc(chatId)
+        .snapshots()
+        .map((doc) => doc.exists ? ChatThread.fromFirestore(doc) : null);
+  }
+
+  /// Stream pesan dalam satu room, urut kronologis dari lama ke baru.
+  Stream<List<ChatMessage>> getChatMessages(
+    String chatId, {
+    required String currentUserId,
+  }) {
+    return _firestore
+        .collection(_chatsCollection)
+        .doc(chatId)
+        .collection(_messagesCollection)
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) =>
+                ChatMessage.fromFirestore(doc, currentUserId: currentUserId))
+            .toList());
+  }
+
+  /// Mengirim pesan ke room `{itemId}_{requesterId}`.
+  /// Jika room belum ada di Firestore, room dibuat sekaligus dalam satu batch.
+  Future<void> sendChatMessage({
+    required String chatId,
+    required String itemId,
+    required String itemTitle,
+    required String ownerId,
+    required String ownerName,
+    required String requesterId,
+    required String requesterName,
+    required String text,
+    bool? knownThreadExists,
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    if (trimmed.length > 1000) {
+      throw Exception('Pesan maksimal 1000 karakter.');
+    }
+
+    final user = await _authService.ensureSignedIn();
+    final senderId = user.uid;
+    final profile =
+        await _firestore.collection(_profilesCollection).doc(senderId).get();
+    final senderName = (profile.data()?['name'] as String?)?.trim();
+    final effectiveSenderName = (senderName != null && senderName.isNotEmpty)
+        ? senderName
+        : (user.displayName?.trim().isNotEmpty == true
+            ? user.displayName!.trim()
+            : (senderId == ownerId ? ownerName : requesterName));
+
+    final chatRef = _firestore.collection(_chatsCollection).doc(chatId);
+    final msgRef = chatRef.collection(_messagesCollection).doc();
+    final exists = knownThreadExists ?? (await chatRef.get()).exists;
+    final senderIsOwner = senderId == ownerId;
+
+    final batch = _firestore.batch();
+    if (!exists) {
+      batch.set(chatRef, {
+        'itemId': itemId,
+        'itemTitle': itemTitle.isNotEmpty ? itemTitle : 'Barang',
+        'ownerId': ownerId,
+        'ownerName': ownerName.isNotEmpty ? ownerName : 'Pemberi',
+        'requesterId': requesterId,
+        'requesterName':
+            requesterName.isNotEmpty ? requesterName : 'Pengguna',
+        'participants': [ownerId, requesterId],
+        'lastMessage': trimmed,
+        'lastSenderId': senderId,
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        'ownerUnread': senderIsOwner ? 0 : 1,
+        'requesterUnread': senderIsOwner ? 1 : 0,
+      });
+    } else {
+      batch.update(chatRef, {
+        'lastMessage': trimmed,
+        'lastSenderId': senderId,
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        if (senderIsOwner) ...{
+          'ownerUnread': 0,
+          'requesterUnread': FieldValue.increment(1),
+        } else ...{
+          'requesterUnread': 0,
+          'ownerUnread': FieldValue.increment(1),
+        },
+      });
+    }
+    batch.set(msgRef, {
+      'senderId': senderId,
+      'senderName': effectiveSenderName,
+      'text': trimmed,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+  }
+
+  /// Menandai seluruh pesan di room sebagai sudah dibaca untuk sisi pemanggil.
+  Future<void> markChatAsRead({
+    required String chatId,
+    required bool isOwner,
+  }) {
+    return _firestore.collection(_chatsCollection).doc(chatId).update({
+      isOwner ? 'ownerUnread' : 'requesterUnread': 0,
+    });
   }
 }
 

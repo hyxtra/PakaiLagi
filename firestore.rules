@@ -34,10 +34,32 @@ service cloud.firestore {
       return /databases/$(database)/documents/pickupRequests/$(itemId + '_' + requesterId);
     }
 
+    function chatPath(chatId) {
+      return /databases/$(database)/documents/chats/$(chatId);
+    }
+
     // Peminta yang pengajuannya sudah diterima pemilik barang.
     function isAcceptedRequester(itemId) {
       let path = requestPath(itemId, uid());
       return exists(path) && get(path).data.status == 'accepted';
+    }
+
+    function validAdditionalImages(data) {
+      return !('additionalImages' in data)
+        || (data.additionalImages is list
+            && data.additionalImages.size() <= 4
+            && (data.additionalImages.size() < 1
+                || (data.additionalImages[0] is string
+                    && data.additionalImages[0].size() < 175000))
+            && (data.additionalImages.size() < 2
+                || (data.additionalImages[1] is string
+                    && data.additionalImages[1].size() < 175000))
+            && (data.additionalImages.size() < 3
+                || (data.additionalImages[2] is string
+                    && data.additionalImages[2].size() < 175000))
+            && (data.additionalImages.size() < 4
+                || (data.additionalImages[3] is string
+                    && data.additionalImages[3].size() < 175000)));
     }
 
     // -------------------------------------------------------------------------
@@ -57,9 +79,9 @@ service cloud.firestore {
       // tidak mungkin tersimpan di dokumen publik.
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
-             'title', 'category', 'description', 'imageBase64', 'donorId',
-             'ownerName', 'kelurahan', 'kota', 'pickupMethods', 'status',
-             'createdAt'])
+             'title', 'category', 'description', 'imageBase64', 'additionalImages', 'donorId',
+             'ownerName', 'kelurahan', 'kota', 'pickupMethods', 'condition',
+             'listingType', 'price', 'status', 'createdAt'])
         // pickupMethods opsional (barang lama tidak punya). Bila ada: daftar
         // berisi 1–5 nama metode berupa teks.
         && (!('pickupMethods' in request.resource.data)
@@ -77,7 +99,20 @@ service cloud.firestore {
         && request.resource.data.kelurahan is string
         && request.resource.data.kota is string
         && request.resource.data.imageBase64 is string
+        && request.resource.data.condition in ['Seperti Baru', 'Sangat Layak', 'Layak Pakai']
+        && request.resource.data.listingType in ['gratis', 'tebus_murah']
+        && request.resource.data.price is int
+        && request.resource.data.price >= 0
+        && request.resource.data.price <= 50000
+        && (request.resource.data.listingType == 'tebus_murah'
+            || request.resource.data.price == 0)
         && request.resource.data.imageBase64.size() < 900000
+        && validAdditionalImages(request.resource.data)
+        // Galeri: cover + hingga empat foto, tiap Base64 string <175 KB.
+        // Batas ini membuat total payload foto tidak melewati 875 KB.
+        && (!('additionalImages' in request.resource.data)
+            || request.resource.data.additionalImages.size() == 0
+            || request.resource.data.imageBase64.size() < 175000)
         && request.resource.data.createdAt == request.time;
 
       // Pemilik hanya boleh mengubah status.
@@ -126,9 +161,12 @@ service cloud.firestore {
         && requestId == request.resource.data.itemId + '_' + uid()
         && request.resource.data.keys().hasOnly([
              'itemId', 'ownerId', 'requesterId', 'requesterName', 'method',
-             'status', 'createdAt'])
+             'status', 'createdAt', 'reason'])
         && request.resource.data.requesterId == uid()
         && request.resource.data.status == 'pending'
+        && (!('reason' in request.resource.data)
+            || (request.resource.data.reason is string
+                && request.resource.data.reason.size() <= 240))
         && request.resource.data.ownerId != uid()
         && request.resource.data.ownerId
              == get(itemPath(request.resource.data.itemId)).data.donorId
@@ -181,6 +219,80 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
 
       allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // CHAT — ID dokumen: {itemId}_{requesterId}
+    // Hanya pemilik barang dan peminta yang dapat membaca & mengirim pesan.
+    // -------------------------------------------------------------------------
+    match /chats/{chatId} {
+      allow get: if signedIn()
+        && (resource == null || uid() in resource.data.participants);
+
+      allow list: if signedIn() && uid() in resource.data.participants;
+
+      allow create: if signedIn()
+        && chatId == request.resource.data.itemId + '_' + request.resource.data.requesterId
+        && request.resource.data.keys().hasOnly([
+             'itemId', 'itemTitle', 'ownerId', 'ownerName',
+             'requesterId', 'requesterName', 'participants',
+             'lastMessage', 'lastSenderId', 'lastMessageAt',
+             'ownerUnread', 'requesterUnread'])
+        && request.resource.data.ownerId != request.resource.data.requesterId
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.ownerId in request.resource.data.participants
+        && request.resource.data.requesterId in request.resource.data.participants
+        && uid() in request.resource.data.participants
+        && request.resource.data.ownerId
+             == get(itemPath(request.resource.data.itemId)).data.donorId
+        && request.resource.data.lastSenderId == uid()
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessage.size() > 0
+        && request.resource.data.lastMessage.size() <= 1000;
+
+      allow update: if signedIn()
+        && uid() in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'lastMessage', 'lastSenderId', 'lastMessageAt',
+             'ownerUnread', 'requesterUnread'])
+        && (
+             (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['ownerUnread'])
+              && uid() == resource.data.ownerId
+              && request.resource.data.ownerUnread == 0)
+             ||
+             (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['requesterUnread'])
+              && uid() == resource.data.requesterId
+              && request.resource.data.requesterUnread == 0)
+             ||
+             (request.resource.data.lastSenderId == uid()
+              && request.resource.data.lastMessage is string
+              && request.resource.data.lastMessage.size() > 0
+              && request.resource.data.lastMessage.size() <= 1000)
+           );
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && exists(chatPath(chatId))
+          && uid() in get(chatPath(chatId)).data.participants;
+
+        allow create: if signedIn()
+          && uid() in getAfter(chatPath(chatId)).data.participants
+          && request.resource.data.keys().hasOnly([
+               'senderId', 'senderName', 'text', 'createdAt'])
+          && request.resource.data.senderId == uid()
+          && request.resource.data.senderName is string
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+
+        allow update, delete: if false;
+      }
     }
   }
 }

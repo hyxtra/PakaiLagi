@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../providers/auth_provider.dart';
 import '../screens/activity_screen.dart';
+import '../screens/inbox_screen.dart';
 import '../screens/location_picker_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart';
@@ -22,6 +23,7 @@ abstract class AppRoutes {
   static const signIn = '/signin';
   static const home = '/home';
   static const post = '/post';
+  static const inbox = '/inbox';
   static const activity = '/activity';
   static const profile = '/profile';
   static const notifications = '/notifications';
@@ -33,8 +35,20 @@ abstract class AppRoutes {
   /// Pinpoint peta. `extra` opsional: [LatLng] titik awal.
   /// Hasil `context.push<PickedLocation>(...)` berisi titik yang dipilih.
   static const pickLocation = '/pick-location';
-  static String chat(String itemId, String peerName) =>
-      '/chat/$itemId?peer=${Uri.encodeComponent(peerName)}';
+  static String chat(
+    String itemId,
+    String peerName, {
+    String? chatId,
+    String? requesterId,
+  }) {
+    final params = <String, String>{
+      'peer': peerName,
+      if (chatId != null && chatId.isNotEmpty) 'chatId': chatId,
+      if (requesterId != null && requesterId.isNotEmpty)
+        'requesterId': requesterId,
+    };
+    return Uri(path: '/chat/$itemId', queryParameters: params).toString();
+  }
 }
 
 final _rootKey = GlobalKey<NavigatorState>();
@@ -79,6 +93,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
+                path: AppRoutes.inbox,
+                builder: (_, __) => const InboxScreen()),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(
                 path: AppRoutes.activity,
                 builder: (_, __) => const ActivityScreen()),
           ]),
@@ -109,6 +128,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => ChatScreen(
           itemId: state.pathParameters['itemId']!,
           peerName: state.uri.queryParameters['peer'] ?? 'Pengguna',
+          chatId: state.uri.queryParameters['chatId'],
+          requesterId: state.uri.queryParameters['requesterId'],
         ),
       ),
       GoRoute(

@@ -1,12 +1,37 @@
-/// Aturan validasi murni untuk data barang sebelum dipublikasikan.
-///
-/// Semua fungsi bersifat **pure** (tidak bergantung pada Flutter / Firebase),
-/// sehingga dapat diuji dengan unit test biasa tanpa widget test.
-///
-/// Dipakai oleh:
-/// - `PostItemScreen._validateForm()` agar validasi UI konsisten dengan aturan di sini.
-/// - `test/validators/item_validator_test.dart`
+// Aturan validasi murni untuk data barang sebelum dipublikasikan.
+//
+// Semua fungsi bersifat pure (tidak bergantung pada Flutter / Firebase),
+// sehingga dapat diuji dengan unit test biasa tanpa widget test.
+//
+// Dipakai oleh:
+//   - PostItemScreen._validateForm() agar validasi UI konsisten dengan aturan di sini.
+//   - test/validators/item_validator_test.dart
+import '../models/item.dart' show ListingType;
+
 abstract final class ItemValidator {
+  /// Jenis penawaran yang saat ini didukung PakaiLagi.
+  static String? validateListingType(String? value) {
+    if (value != ListingType.gratis && value != ListingType.tebusMurah) {
+      return 'Pilih Gratis atau Tebus Murah';
+    }
+    return null;
+  }
+
+  /// Harga simbolis hanya berlaku untuk tebus murah, dengan batas Rp50.000.
+  static String? validateListingPrice({
+    required String listingType,
+    required int? price,
+  }) {
+    if (listingType == ListingType.gratis) return null;
+    if (listingType != ListingType.tebusMurah) {
+      return 'Pilih jenis penawaran yang valid';
+    }
+    if (price == null) return 'Masukkan harga tebus murah';
+    if (price < 0) return 'Harga tidak boleh kurang dari Rp0';
+    if (price > 50000) return 'Harga maksimal Rp50.000';
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
   // VALIDASI JUDUL
   // ---------------------------------------------------------------------------
