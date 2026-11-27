@@ -19,12 +19,73 @@ import 'package:pakailagi/widgets/transaction_progress.dart';
 
 // PNG 1x1 transparan valid agar Image.memory di PhotoPlaceholder ter-render.
 final _samplePngBase64 = base64Encode(Uint8List.fromList([
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
-  0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-  0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x06,
+  0x00,
+  0x00,
+  0x00,
+  0x1F,
+  0x15,
+  0xC4,
+  0x89,
+  0x00,
+  0x00,
+  0x00,
+  0x0A,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x78,
+  0x9C,
+  0x63,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x05,
+  0x00,
+  0x01,
+  0x0D,
+  0x0A,
+  0x2D,
+  0xB4,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
 ]));
 
 void main() {
@@ -33,7 +94,9 @@ void main() {
     final decided = DateTime(2026, 11, 26, 12, 30);
     final completed = DateTime(2026, 11, 27, 8, 15);
 
-    test('pending request menunjukkan langkah Diajukan selesai dan Disetujui aktif', () {
+    test(
+        'pending request menunjukkan langkah Diajukan selesai dan Disetujui aktif',
+        () {
       final req = CloudPickupRequest(
         id: 'item1_u2',
         itemId: 'item1',
@@ -59,7 +122,9 @@ void main() {
       expect(steps[3].state, StepProgressState.upcoming);
     });
 
-    test('accepted + reserved menunjukkan Serah Terima aktif dan Disetujui selesai', () {
+    test(
+        'accepted + reserved menunjukkan Serah Terima aktif dan Disetujui selesai',
+        () {
       final req = CloudPickupRequest(
         id: 'item1_u2',
         itemId: 'item1',
@@ -85,7 +150,9 @@ void main() {
       expect(steps[3].state, StepProgressState.upcoming);
     });
 
-    test('completed menunjukkan seluruh 4 langkah selesai beserta waktu selesai', () {
+    test(
+        'completed menunjukkan seluruh 4 langkah selesai beserta waktu selesai',
+        () {
       final req = CloudPickupRequest(
         id: 'item1_u2',
         itemId: 'item1',
@@ -158,7 +225,8 @@ void main() {
     });
   });
 
-  testWidgets('InboxScreen menampilkan percakapan, thumbnail barang, dan badge unread',
+  testWidgets(
+      'InboxScreen menampilkan percakapan, thumbnail barang, dan badge unread',
       (tester) async {
     final items = [
       ItemModel(
@@ -210,7 +278,8 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
   });
 
-  testWidgets('ChatScreen menampilkan kartu barang ala Shopee beserta sampul & pesan',
+  testWidgets(
+      'ChatScreen menampilkan kartu barang ala Shopee beserta sampul & pesan',
       (tester) async {
     final item = ItemModel(
       id: 'item1',
@@ -253,9 +322,11 @@ void main() {
       ProviderScope(
         overrides: [
           currentFirebaseUidProvider.overrideWithValue('req1'),
-          cloudItemByIdProvider('item1').overrideWith((_) => Stream.value(item)),
+          cloudItemByIdProvider('item1')
+              .overrideWith((_) => Stream.value(item)),
           cloudItemsStreamProvider.overrideWith((_) => Stream.value([item])),
-          myCloudItemsStreamProvider.overrideWith((_) => Stream.value(const [])),
+          myCloudItemsStreamProvider
+              .overrideWith((_) => Stream.value(const [])),
           chatThreadByIdProvider('item1_req1')
               .overrideWith((_) => Stream.value(thread)),
           chatMessagesProvider('item1_req1')
