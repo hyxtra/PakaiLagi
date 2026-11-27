@@ -2,6 +2,9 @@ import 'dart:async';
 
 // firebase_auth juga mengekspor FirebaseException dari firebase_core.
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+import 'firebase_auth_service.dart';
 
 /// Hasil operasi tulis Firestore dari sudut pandang pengguna.
 enum WriteOutcome {
@@ -38,6 +41,24 @@ const queuedSuffix =
 
 /// Mengubah exception menjadi pesan yang bisa dipahami pengguna.
 String friendlyError(Object error, {required String fallback}) {
+  if (error is GoogleSignInCancelledException) {
+    return 'Masuk dengan Google dibatalkan.';
+  }
+  if (error is GoogleSignInException) {
+    switch (error.code) {
+      case GoogleSignInExceptionCode.canceled:
+        return 'Masuk dengan Google dibatalkan.';
+      case GoogleSignInExceptionCode.clientConfigurationError:
+      case GoogleSignInExceptionCode.providerConfigurationError:
+        return 'Konfigurasi Google Sign-In belum lengkap (aktifkan Google & daftar SHA-1 di Firebase Console).';
+      case GoogleSignInExceptionCode.interrupted:
+        return 'Proses masuk Google terganggu. Silakan coba lagi.';
+      case GoogleSignInExceptionCode.uiUnavailable:
+        return 'Layar pemilihan akun Google tidak tersedia di perangkat ini.';
+      default:
+        return fallback;
+    }
+  }
   if (error is FirebaseAuthException) {
     switch (error.code) {
       case 'network-request-failed':
@@ -57,9 +78,14 @@ String friendlyError(Object error, {required String fallback}) {
       case 'too-many-requests':
         return 'Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.';
       case 'operation-not-allowed':
-        return 'Login email/password belum diaktifkan di Firebase Console.';
+        return 'Metode login ini belum diaktifkan di Firebase Console.';
       case 'credential-already-in-use':
-        return 'Email ini sudah terhubung ke akun lain. Masuk dengan email tersebut.';
+        return 'Akun ini sudah terhubung ke pengguna lain. Coba masuk langsung dengan akun tersebut.';
+      case 'account-exists-with-different-credential':
+        return 'Email ini sudah terdaftar dengan metode masuk lain.';
+      case 'popup-closed-by-user':
+      case 'cancelled-popup-request':
+        return 'Jendela masuk Google ditutup sebelum selesai.';
       default:
         return fallback;
     }

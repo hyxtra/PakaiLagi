@@ -5,6 +5,12 @@ import '../models/app_user.dart';
 import '../repositories/firebase_repository.dart';
 import '../services/firebase_auth_service.dart';
 
+/// Hasil proses masuk/daftar berbasis email.
+enum AuthFlowResult {
+  signedIn,
+  needsEmailVerification,
+}
+
 /// Menyimpan profil aplikasi untuk sesi Firebase Auth yang sedang aktif.
 /// Identitas pemilik data selalu Firebase UID, bukan email atau nama tampilan.
 class AuthNotifier extends StateNotifier<AppUser?> {
@@ -26,17 +32,64 @@ class AuthNotifier extends StateNotifier<AppUser?> {
   final FirebaseAuthService? _authService;
   final FirebaseRepository? _repository;
 
+  /// Email dari sesi Firebase yang menunggu verifikasi (jika ada).
+  String? get pendingVerificationEmail =>
+      _authService?.pendingUnverifiedUser?.email;
+
   Future<void> _restoreSession() async {
     try {
       final firebaseUser = await _authService!.restoreUser();
       if (firebaseUser == null || firebaseUser.isAnonymous) return;
+      if (!FirebaseAuthService.isAccountVerified(firebaseUser)) return;
       state = await _loadProfile(firebaseUser);
     } catch (_) {
       // Layar masuk tetap dapat digunakan saat profil belum dapat dibaca.
     }
   }
 
-  Future<void> register({
+  /// Masuk menggunakan akun Google asli dan sinkronkan profil ke Firestore.
+  Future<void> signInWithGoogle() async {
+    final firebaseUser = await _authService!.signInWithGoogle();
+    final existing = await _repository!.getMyProfileOnce(firebaseUser.uid);
+    final googleEmail = firebaseUser.email?.trim() ?? '';
+    final fallbackName = _prettify(googleEmail.split('@').first);
+    final googleName = (firebaseUser.displayName?.trim().isNotEmpty == true)
+        ? firebaseUser.displayName!.trim()
+        : (fallbackName.isNotEmpty ? fallbackName : 'Pengguna');
+
+    final profile = existing == null
+        ? AppUser(
+            id: firebaseUser.uid,
+            name: googleName,
+            email: googleEmail,
+            phone: '',
+            address: '',
+          )
+        : existing.copyWith(
+            name: (existing.name.trim().isEmpty || existing.name == 'Pengguna')
+                ? googleName
+                : existing.name,
+            email: existing.email.trim().isEmpty ? googleEmail : existing.email,
+          );
+
+    if (existing == null ||
+        existing.name != profile.name ||
+        existing.email != profile.email) {
+      await _repository.saveMyProfile(
+        name: profile.name,
+        email: profile.email,
+        phone: profile.phone,
+        address: profile.address,
+        kelurahan: profile.kelurahan,
+        kota: profile.kota,
+        latitude: profile.latitude,
+        longitude: profile.longitude,
+      );
+    }
+    state = profile;
+  }
+
+  Future<AuthFlowResult> register({
     required String name,
     required String email,
     required String password,
@@ -69,10 +122,15 @@ class AuthNotifier extends StateNotifier<AppUser?> {
       latitude: profile.latitude,
       longitude: profile.longitude,
     );
+    if (!FirebaseAuthService.isAccountVerified(firebaseUser)) {
+      state = null;
+      return AuthFlowResult.needsEmailVerification;
+    }
     state = profile;
+    return AuthFlowResult.signedIn;
   }
 
-  Future<void> signIn({
+  Future<AuthFlowResult> signIn({
     required String email,
     required String password,
   }) async {
@@ -80,7 +138,38 @@ class AuthNotifier extends StateNotifier<AppUser?> {
       email: email,
       password: password,
     );
+    if (!FirebaseAuthService.isAccountVerified(firebaseUser)) {
+      try {
+        await _authService.sendEmailVerification();
+      } on FirebaseAuthException {
+        // Tetap arahkan ke panel verifikasi meski rate-limit kirim ulang aktif.
+      }
+      state = null;
+      return AuthFlowResult.needsEmailVerification;
+    }
     state = await _loadProfile(firebaseUser);
+    return AuthFlowResult.signedIn;
+  }
+
+  /// Memeriksa ke server Firebase apakah pengguna sudah mengklik tautan
+  /// verifikasi email. Mengembalikan true jika sudah terverifikasi dan masuk.
+  Future<bool> completeEmailVerification() async {
+    final refreshed = await _authService!.reloadCurrentUser();
+    if (refreshed == null || !FirebaseAuthService.isAccountVerified(refreshed)) {
+      return false;
+    }
+    state = await _loadProfile(refreshed);
+    return true;
+  }
+
+  /// Mengirim ulang email verifikasi.
+  Future<void> resendVerificationEmail() async {
+    await _authService!.sendEmailVerification();
+  }
+
+  /// Membatalkan sesi yang belum diverifikasi agar pengguna bisa ganti akun.
+  Future<void> cancelPendingVerification() async {
+    await signOut();
   }
 
   Future<AppUser> _loadProfile(User firebaseUser) async {
@@ -88,9 +177,12 @@ class AuthNotifier extends StateNotifier<AppUser?> {
     if (saved != null) return saved;
     final email = firebaseUser.email ?? '';
     final localName = email.split('@').first;
+    final display = firebaseUser.displayName?.trim();
     return AppUser(
       id: firebaseUser.uid,
-      name: firebaseUser.displayName ?? _prettify(localName),
+      name: (display != null && display.isNotEmpty)
+          ? display
+          : _prettify(localName),
       email: email,
       phone: '',
       address: '',

@@ -12,7 +12,20 @@
           "package_name": "com.pakailagi.pakailagi"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "772093175926-ggqkld5ciof17j352ctn5mvt218e2br1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pakailagi.pakailagi",
+            "certificate_hash": "f51989e9cc13cf5a353464436e5030882e1999e5"
+          }
+        },
+        {
+          "client_id": "772093175926-psrmqut57mnn3g9mstseqpr816e8e5s6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCHcZbMWKesImvVj7zrPNtZcRas_uIFzSo"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "772093175926-psrmqut57mnn3g9mstseqpr816e8e5s6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

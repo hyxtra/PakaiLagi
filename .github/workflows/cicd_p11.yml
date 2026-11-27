@@ -37,6 +37,25 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Configure release keystore (if secrets set)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+              echo "::error::KEYSTORE_PASSWORD, KEY_ALIAS, atau KEY_PASSWORD belum diisi di GitHub Secrets."
+              exit 1
+            fi
+            echo "$KEYSTORE_BASE64" | tr -d '\n\r ' | base64 -d > android/app/release-keystore.jks
+            printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release-keystore.jks\n" \
+              "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS" > android/key.properties
+            echo "Release keystore configured."
+          else
+            echo "::warning::KEYSTORE_BASE64 secret not set; falling back to debug signing."
+          fi
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
