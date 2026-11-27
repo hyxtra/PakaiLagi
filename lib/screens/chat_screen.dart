@@ -1,21 +1,39 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../business/share_formatter.dart';
 import '../models/chat_message.dart';
 import '../models/item.dart';
+import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/cloud_item_provider.dart';
 import '../providers/items_provider.dart';
+import '../repositories/firebase_repository.dart';
+import '../router/app_router.dart';
+import '../services/firebase_auth_service.dart';
+import '../services/user_messages.dart';
 import '../theme/app_palette.dart';
 import '../widgets/accessible_tap.dart';
 import '../widgets/photo_placeholder.dart';
+import '../widgets/progress_dialog.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
-  const ChatScreen({super.key, required this.itemId, required this.peerName});
+  const ChatScreen({
+    super.key,
+    required this.itemId,
+    required this.peerName,
+    this.chatId,
+    this.requesterId,
+  });
 
   final String itemId;
   final String peerName;
+  final String? chatId;
+  final String? requesterId;
 
   @override
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
@@ -24,30 +42,16 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _composer = TextEditingController();
   final _scroll = ScrollController();
+  bool _sending = false;
+  int _lastMessageCount = 0;
+  bool _markReadQueued = false;
 
   static const _quickReplies = [
     'Masih tersedia?',
     'Bisa ambil hari ini?',
+    'Lokasi tepatnya di mana ya?',
     'Terima kasih! 🙏',
-    'Sesuai lokasi ya',
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    // Inisialisasi thread setelah frame pertama (butuh akses provider item).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final item = ref.read(itemByIdProvider(widget.itemId));
-      final user = ref.read(authProvider);
-      final requesterIsMe =
-          item == null || user == null ? true : item.ownerId != user.id;
-      ref.read(chatProvider.notifier).ensureThread(
-            itemId: widget.itemId,
-            itemTitle: item?.title ?? 'Barang',
-            requesterIsMe: requesterIsMe,
-          );
-    });
-  }
 
   @override
   void dispose() {
@@ -56,25 +60,229 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
-  void _send(String text) {
-    final t = text.trim();
-    if (t.isEmpty) return;
-    ref.read(chatProvider.notifier).send(widget.itemId, t);
-    _composer.clear();
+  String? _resolveChatId(String? currentUid) {
+    final explicit = widget.chatId?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final reqId = widget.requesterId?.trim();
+    if (reqId != null && reqId.isNotEmpty) {
+      return FirebaseRepository.chatIdFor(widget.itemId, reqId);
+    }
+    if (currentUid != null && currentUid.isNotEmpty) {
+      return FirebaseRepository.chatIdFor(widget.itemId, currentUid);
+    }
+    return null;
+  }
+
+  /// Mengambil ItemModel dari detail stream, atau fallback instan dari cache
+  /// feed agar judul & foto sampul langsung tampil tanpa jeda kosong.
+  ItemModel? _findCloudItem(WidgetRef ref) {
+    final direct = ref.watch(cloudItemByIdProvider(widget.itemId)).valueOrNull;
+    if (direct != null) return direct;
+    final feed = ref.watch(cloudItemsStreamProvider).valueOrNull;
+    if (feed != null) {
+      for (final it in feed) {
+        if (it.id == widget.itemId) return it;
+      }
+    }
+    final mine = ref.watch(myCloudItemsStreamProvider).valueOrNull;
+    if (mine != null) {
+      for (final it in mine) {
+        if (it.id == widget.itemId) return it;
+      }
+    }
+    return null;
+  }
+
+  Item? _resolveItem(Item? localItem, ItemModel? cloudItem) {
+    if (localItem != null) return localItem;
+    if (cloudItem == null) return null;
+    return Item(
+      id: cloudItem.id,
+      title: cloudItem.title,
+      category: cloudItem.category,
+      description: cloudItem.description,
+      ownerId: cloudItem.donorId,
+      ownerName: cloudItem.ownerName,
+      ownerPhone: '',
+      status: cloudItem.status == 'completed'
+          ? ItemStatus.completed
+          : cloudItem.status == 'reserved'
+              ? ItemStatus.reserved
+              : ItemStatus.available,
+      swatch: const Color(0xFF2F6B4F),
+      pickupMethods: cloudItem.availablePickupMethods,
+      address: cloudItem.areaLabel,
+      condition: cloudItem.condition,
+      listingType: cloudItem.listingType,
+      price: cloudItem.price,
+      imageUrl: cloudItem.imageBase64.isEmpty
+          ? null
+          : 'base64:${cloudItem.imageBase64}',
+    );
+  }
+
+  void _scheduleMarkRead(String chatId, ChatThread thread, String currentUid) {
+    if (_markReadQueued || thread.unreadFor(currentUid) <= 0) return;
+    _markReadQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _markReadQueued = false;
+      unawaited(ref
+          .read(firebaseRepositoryProvider)
+          .markChatAsRead(chatId: chatId, isOwner: thread.isOwner(currentUid))
+          .then<void>((_) {}, onError: (Object _) {}));
+    });
+  }
+
+  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
       }
     });
+  }
+
+  Future<void> _send(
+    String rawText, {
+    required String? chatId,
+    required ChatThread? thread,
+    required ItemModel? cloudItem,
+    required String? currentUid,
+  }) async {
+    final text = rawText.trim();
+    if (text.isEmpty || _sending) return;
+
+    final messenger = AppMessenger.of(context);
+    if (chatId == null || currentUid == null || currentUid.isEmpty) {
+      showAppSnackBar(messenger, 'Sesi akun belum siap. Coba sesaat lagi.',
+          isError: true);
+      return;
+    }
+
+    final profile = ref.read(cloudProfileProvider).valueOrNull;
+    final authUser = ref.read(authProvider);
+    final myName = (profile?.name.trim().isNotEmpty == true)
+        ? profile!.name.trim()
+        : (authUser?.name.trim().isNotEmpty == true
+            ? authUser!.name.trim()
+            : 'Pengguna');
+
+    final ownerId = thread?.ownerId ?? cloudItem?.donorId ?? '';
+    final ownerName =
+        thread?.ownerName ?? cloudItem?.ownerName ?? widget.peerName;
+    final itemTitle = thread?.itemTitle ?? cloudItem?.title ?? 'Barang';
+
+    final String requesterId;
+    final String requesterName;
+    if (thread != null) {
+      requesterId = thread.requesterId;
+      requesterName = thread.requesterName;
+    } else if (widget.requesterId != null && widget.requesterId!.isNotEmpty) {
+      requesterId = widget.requesterId!;
+      requesterName = requesterId == currentUid ? myName : widget.peerName;
+    } else {
+      requesterId = currentUid;
+      requesterName = myName;
+    }
+
+    if (ownerId.isEmpty || requesterId.isEmpty) {
+      showAppSnackBar(
+        messenger,
+        'Data barang masih dimuat. Tunggu sebentar lalu coba lagi.',
+        isError: true,
+      );
+      return;
+    }
+    if (ownerId == requesterId) {
+      showAppSnackBar(
+        messenger,
+        'Tidak dapat mengirim pesan ke barang milik sendiri.',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() => _sending = true);
+    final previousDraft = _composer.text;
+    if (rawText == _composer.text) {
+      _composer.clear();
+    }
+
+    try {
+      await awaitWrite(
+        ref.read(firebaseRepositoryProvider).sendChatMessage(
+              chatId: chatId,
+              itemId: widget.itemId,
+              itemTitle: itemTitle,
+              ownerId: ownerId,
+              ownerName: ownerName,
+              requesterId: requesterId,
+              requesterName: requesterName,
+              text: text,
+              knownThreadExists: thread != null,
+            ),
+        timeout: const Duration(seconds: 10),
+      );
+      _scrollToBottom();
+    } catch (error) {
+      if (mounted && _composer.text.isEmpty && previousDraft.isNotEmpty) {
+        _composer.text = previousDraft;
+      }
+      showAppSnackBar(
+        messenger,
+        friendlyError(error, fallback: 'Gagal mengirim pesan. Coba lagi.'),
+        isError: true,
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final item = ref.watch(itemByIdProvider(widget.itemId));
-    final messages =
-        ref.watch(chatProvider)[widget.itemId] ?? const <ChatMessage>[];
+    final currentUid = ref.watch(currentFirebaseUidProvider);
+    final chatId = _resolveChatId(currentUid);
+
+    final localItem = ref.watch(itemByIdProvider(widget.itemId));
+    final cloudItemAsync = ref.watch(cloudItemByIdProvider(widget.itemId));
+    final cloudItem = _findCloudItem(ref);
+    final item = _resolveItem(localItem, cloudItem);
+
+    final threadAsync = chatId == null
+        ? const AsyncValue<ChatThread?>.loading()
+        : ref.watch(chatThreadByIdProvider(chatId));
+    final thread = threadAsync.valueOrNull;
+
+    if (chatId != null && thread != null && currentUid != null) {
+      _scheduleMarkRead(chatId, thread, currentUid);
+    }
+
+    // Hanya subscribe subkoleksi messages bila room chat sudah ada di Firestore.
+    final messagesAsync = (chatId != null && thread != null)
+        ? ref.watch(chatMessagesProvider(chatId))
+        : const AsyncValue<List<ChatMessage>>.data([]);
+
+    final messages = messagesAsync.valueOrNull ?? const <ChatMessage>[];
+    if (messages.length != _lastMessageCount) {
+      _lastMessageCount = messages.length;
+      if (messages.isNotEmpty) _scrollToBottom();
+    }
+
+    final displayPeerName = (thread != null && currentUid != null)
+        ? thread.peerNameFor(currentUid)
+        : widget.peerName;
+    final displayTitle = item?.title ?? thread?.itemTitle ?? 'Barang';
+    final isOwner = currentUid != null &&
+        ((cloudItem != null && cloudItem.donorId == currentUid) ||
+            (thread != null && thread.ownerId == currentUid));
+
+    // Item 0 di daftar chat adalah kartu konteks barang ala Shopee; setelah itu
+    // diikuti daftar pesan (atau petunjuk mulai obrolan bila belum ada pesan).
+    final itemCount = 1 + (messages.isEmpty ? 1 : messages.length);
 
     return Scaffold(
       backgroundColor: p.bg,
@@ -93,8 +301,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             CircleAvatar(
               radius: 18,
               backgroundColor: p.surfaceAlt,
-              child: const ExcludeSemantics(
-                  child: Text('👤', style: TextStyle(fontSize: 16))),
+              child: Text(
+                displayPeerName.isNotEmpty
+                    ? displayPeerName.trim()[0].toUpperCase()
+                    : '?',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: p.primary),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -102,13 +315,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(widget.peerName,
+                  Text(displayPeerName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontSize: 15.5, fontWeight: FontWeight.w800)),
-                  Text('Online',
-                      style: TextStyle(fontSize: 11.5, color: p.primary)),
+                  Text(displayTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: p.textMuted)),
                 ],
               ),
             ),
@@ -119,100 +334,288 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              controller: _scroll,
-              // Men-scroll riwayat chat menutup keyboard.
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              itemCount: messages.length,
-              itemBuilder: (_, i) {
-                final m = messages[i];
-                if (m.isItemCard) return _itemRefCard(item, m.fromMe);
-                return _bubble(m);
-              },
-            ),
+            child: threadAsync.isLoading && thread == null
+                ? Center(child: CircularProgressIndicator(color: p.primary))
+                : (threadAsync.hasError || messagesAsync.hasError)
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                friendlyError(
+                                  threadAsync.error ??
+                                      messagesAsync.error ??
+                                      Exception(),
+                                  fallback: 'Gagal memuat pesan.',
+                                ),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: p.textMuted),
+                              ),
+                              if (chatId != null) ...[
+                                const SizedBox(height: 10),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    ref.invalidate(
+                                        chatThreadByIdProvider(chatId));
+                                    ref.invalidate(
+                                        chatMessagesProvider(chatId));
+                                  },
+                                  icon: const Icon(Icons.refresh, size: 18),
+                                  label: const Text('Coba lagi'),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scroll,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                        itemCount: itemCount,
+                        itemBuilder: (_, i) {
+                          if (i == 0) {
+                            return _shopeeItemContextCard(
+                              item: item,
+                              fallbackTitle: displayTitle,
+                              isLoadingItem:
+                                  item == null && cloudItemAsync.isLoading,
+                              isOwner: isOwner,
+                            );
+                          }
+                          if (messages.isEmpty) {
+                            return _emptyConversationHint(displayPeerName, p);
+                          }
+                          return _bubble(messages[i - 1], displayPeerName);
+                        },
+                      ),
           ),
-          _quickRepliesBar(),
-          _composerBar(),
+          _quickRepliesBar(
+            chatId: chatId,
+            thread: thread,
+            cloudItem: cloudItem,
+            currentUid: currentUid,
+          ),
+          _composerBar(
+            chatId: chatId,
+            thread: thread,
+            cloudItem: cloudItem,
+            currentUid: currentUid,
+          ),
         ],
       ),
     );
   }
 
-  Widget _itemRefCard(Item? item, bool fromMe) {
+  /// Kartu konteks barang bergaya Shopee ("Kamu menanyakan barang ini") yang
+  /// langsung tampil di dalam percakapan beserta foto sampul, harga, & status.
+  Widget _shopeeItemContextCard({
+    required Item? item,
+    required String fallbackTitle,
+    required bool isLoadingItem,
+    required bool isOwner,
+  }) {
     final p = context.palette;
-    return Align(
-      alignment: fromMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        constraints: const BoxConstraints(maxWidth: 260),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: p.surface,
-          borderRadius: BorderRadius.circular(16),
-          border:
-              Border.all(color: p.primary.withValues(alpha: 0.5), width: 1.4),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('BARANG YANG DIMINTA',
-                style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.6,
-                    color: p.primary)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                SizedBox(
-                  width: 52,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: item == null
-                        ? Container(height: 52, color: p.surfaceAlt)
-                        : PhotoPlaceholder(item: item, height: 52, radius: 10),
+    final headerText =
+        isOwner ? 'Peminta menanyakan barang ini' : 'Kamu menanyakan barang ini';
+    final priceText = item == null
+        ? 'Memuat detail barang…'
+        : ShareFormatter.priceLabel(
+            listingType: item.listingType,
+            price: item.price,
+          );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  headerText,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: p.text,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item?.title ?? 'Barang',
+              ),
+              if (item != null)
+                GestureDetector(
+                  onTap: () => context.push(AppRoutes.itemDetail(widget.itemId)),
+                  child: Text(
+                    'Lihat Barang ›',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: p.primary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Kotak abu/hangat berisi foto sampul + judul + harga + status (mirip Shopee)
+          InkWell(
+            onTap: item == null
+                ? null
+                : () => context.push(AppRoutes.itemDetail(widget.itemId)),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: p.bg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: p.border),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 64,
+                    height: 64,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: item != null
+                          ? PhotoPlaceholder(item: item, height: 64, radius: 10)
+                          : Container(
+                              color: p.surfaceAlt,
+                              alignment: Alignment.center,
+                              child: isLoadingItem
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: p.primary),
+                                    )
+                                  : Icon(Icons.inventory_2_outlined,
+                                      size: 24, color: p.textMuted),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item?.title ?? fallbackTitle,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 13.5,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: p.text,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          item != null
+                              ? '$priceText • ${item.condition}'
+                              : priceText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: p.textMuted),
+                        ),
+                        if (item != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            item.status.label,
+                            style: TextStyle(
+                              fontSize: 12,
                               fontWeight: FontWeight.w800,
-                              color: p.text)),
-                      const SizedBox(height: 2),
-                      Text(item?.category ?? '-',
-                          style: TextStyle(fontSize: 12, color: p.textMuted)),
-                    ],
+                              color: p.statusColor(item.status),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
+          ),
+          if (item != null) ...[
+            const SizedBox(height: 10),
+            _metaRow('Kategori', item.category, p),
+            if (item.address.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              _metaRow('Lokasi Area', item.address, p),
+            ],
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _bubble(ChatMessage m) {
+  Widget _metaRow(String label, String value, AppPalette p) => Row(
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: p.textMuted),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: p.text,
+              ),
+            ),
+          ),
+        ],
+      );
+
+  Widget _emptyConversationHint(String peerName, AppPalette p) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Belum ada pesan dengan $peerName',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: p.textMuted),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Ketuk balasan cepat di bawah atau tulis pesanmu untuk memulai obrolan.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: p.textMuted),
+            ),
+          ],
+        ),
+      );
+
+  Widget _bubble(ChatMessage m, String peerName) {
     final p = context.palette;
     final mine = m.fromMe;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      // Satu fokus per pesan: "Kamu, pukul 09:41: Halo…".
       child: Semantics(
-        label: '${mine ? 'Kamu' : widget.peerName}, pukul ${m.time}: '
-            '${m.text ?? ''}',
+        label: '${mine ? 'Kamu' : peerName}, pukul ${m.time}: ${m.text ?? ''}',
         excludeSemantics: true,
         child: Container(
           margin: const EdgeInsets.only(bottom: 10),
-          constraints: const BoxConstraints(maxWidth: 260),
+          constraints: const BoxConstraints(maxWidth: 270),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: mine ? p.bubbleMine : p.bubbleTheirs,
@@ -236,7 +639,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               Text(m.time,
                   style: TextStyle(
                       fontSize: 10.5,
-                      // 85% putih: kontras 5,08:1 (white70 hanya 4,03:1).
                       color: mine
                           ? Colors.white.withValues(alpha: 0.85)
                           : p.textMuted)),
@@ -247,11 +649,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _quickRepliesBar() {
+  Widget _quickRepliesBar({
+    required String? chatId,
+    required ChatThread? thread,
+    required ItemModel? cloudItem,
+    required String? currentUid,
+  }) {
     final p = context.palette;
     return SizedBox(
-      // Baris lebih tinggi agar tiap chip punya area sentuh 48 dp; tampilan
-      // chip tetap 34 dp seperti sebelumnya.
       height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -259,7 +664,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         itemCount: _quickReplies.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) => AccessibleTap(
-          onTap: () => _send(_quickReplies[i]),
+          onTap: () => _send(
+            _quickReplies[i],
+            chatId: chatId,
+            thread: thread,
+            cloudItem: cloudItem,
+            currentUid: currentUid,
+          ),
           label: 'Kirim balasan cepat: ${_quickReplies[i]}',
           borderRadius: BorderRadius.circular(20),
           child: Container(
@@ -282,7 +693,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Widget _composerBar() {
+  Widget _composerBar({
+    required String? chatId,
+    required ChatThread? thread,
+    required ItemModel? cloudItem,
+    required String? currentUid,
+  }) {
     final p = context.palette;
     return SafeArea(
       top: false,
@@ -299,9 +715,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 controller: _composer,
                 style: TextStyle(color: p.text),
                 textInputAction: TextInputAction.send,
-                onSubmitted: _send,
-                // Keyboard tetap terbuka setelah kirim, agar bisa langsung
-                // mengetik pesan berikutnya.
+                onSubmitted: (v) => _send(
+                  v,
+                  chatId: chatId,
+                  thread: thread,
+                  cloudItem: cloudItem,
+                  currentUid: currentUid,
+                ),
                 onEditingComplete: () {},
                 decoration: InputDecoration(
                   hintText: 'Tulis pesan…',
@@ -325,18 +745,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 button: true,
                 label: 'Kirim pesan',
                 excludeSemantics: true,
-                onTap: () => _send(_composer.text),
+                onTap: () => _send(
+                  _composer.text,
+                  chatId: chatId,
+                  thread: thread,
+                  cloudItem: cloudItem,
+                  currentUid: currentUid,
+                ),
                 child: Material(
                   color: p.primary,
                   shape: const CircleBorder(),
                   child: InkWell(
                     customBorder: const CircleBorder(),
-                    onTap: () => _send(_composer.text),
-                    // 48 dp: ukuran minimal area sentuh (sebelumnya 46).
+                    onTap: _sending
+                        ? null
+                        : () => _send(
+                              _composer.text,
+                              chatId: chatId,
+                              thread: thread,
+                              cloudItem: cloudItem,
+                              currentUid: currentUid,
+                            ),
                     child: SizedBox(
                         width: 48,
                         height: 48,
-                        child: Icon(Icons.send, color: p.onPrimary, size: 20)),
+                        child: _sending
+                            ? Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: p.onPrimary),
+                              )
+                            : Icon(Icons.send, color: p.onPrimary, size: 20)),
                   ),
                 ),
               ),

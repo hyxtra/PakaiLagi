@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../business/share_formatter.dart';
-import '../business/distance_helper.dart';
 import '../data/pickup_methods.dart';
 import '../business/image_base64.dart';
 import '../business/item_ownership.dart';
 import '../business/item_status_rules.dart';
+import '../models/cloud_pickup_request.dart';
 import '../models/item.dart';
+import '../models/item_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_item_provider.dart';
 import '../providers/items_provider.dart';
@@ -25,6 +24,7 @@ import '../widgets/badges.dart';
 import '../widgets/photo_placeholder.dart';
 import '../widgets/pin_preview_map.dart';
 import '../widgets/progress_dialog.dart';
+import '../widgets/transaction_progress.dart';
 
 class ItemDetailScreen extends ConsumerWidget {
   const ItemDetailScreen({super.key, required this.itemId});
@@ -49,7 +49,12 @@ class ItemDetailScreen extends ConsumerWidget {
         onRetry: () => ref.invalidate(cloudItemByIdProvider(itemId)),
       ),
       data: (data) {
-        if (data == null) return _notFoundScaffold(context);
+        if (data == null) {
+          return _notFoundScaffold(
+            context,
+            onRetry: () => ref.invalidate(cloudItemByIdProvider(itemId)),
+          );
+        }
         return _detailScaffold(
             context,
             ref,
@@ -69,13 +74,11 @@ class ItemDetailScreen extends ConsumerWidget {
               swatch: const Color(0xFF2F6B4F),
               pickupMethods: data.availablePickupMethods,
               address: data.areaLabel,
-              condition: data.condition,
-              listingType: data.listingType,
-              price: data.price,
               imageUrl:
                   data.imageBytes == null ? null : 'base64:${data.imageBase64}',
             ),
             isCloudItem: true,
+            cloudModel: data,
             galleryBase64: data.allImageBase64);
       },
     );
@@ -110,10 +113,11 @@ class ItemDetailScreen extends ConsumerWidget {
       );
 
   Widget _detailScaffold(BuildContext context, WidgetRef ref, Item item,
-      {bool isCloudItem = false, List<String> galleryBase64 = const []}) {
+      {bool isCloudItem = false,
+      ItemModel? cloudModel,
+      List<String> galleryBase64 = const []}) {
     final p = context.palette;
     final user = ref.watch(authProvider);
-    final profile = ref.watch(cloudProfileProvider).valueOrNull ?? user;
     final firebaseUid = ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
 
     final ownedByMe = user != null && item.ownerId == user.id;
@@ -131,6 +135,27 @@ class ItemDetailScreen extends ConsumerWidget {
     final myRequest = isCloudItem && !isOwner
         ? ref.watch(myCloudRequestForItemProvider(item.id)).valueOrNull
         : null;
+
+    // Bagi pemilik, ambil pengajuan yang diterima saat status reserved/completed
+    // agar timeline progress dan tombol chat peminta bisa tampil akurat.
+    CloudPickupRequest? acceptedRequest;
+    if (isCloudItem &&
+        canDeleteCloudItem &&
+        item.status != ItemStatus.available) {
+      final incoming =
+          ref.watch(cloudRequestsForItemProvider(item.id)).valueOrNull ??
+              const <CloudPickupRequest>[];
+      for (final req in incoming) {
+        if (req.status == 'accepted') {
+          acceptedRequest = req;
+          break;
+        }
+      }
+    }
+    final activeRequest = isOwner ? acceptedRequest : myRequest;
+    final showProgressTimeline = isCloudItem &&
+        ((!isOwner && myRequest != null) ||
+            (isOwner && item.status != ItemStatus.available));
 
     return Scaffold(
       backgroundColor: p.bg,
@@ -161,18 +186,6 @@ class ItemDetailScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    Positioned(
-                      top: 12,
-                      right: 12,
-                      child: SafeArea(
-                        child: _circleButton(
-                          Icons.share_outlined,
-                          const Color(0xFF1E2621),
-                          Colors.white.withValues(alpha: 0.92),
-                          () => _shareOnWhatsApp(context, item),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
                 Padding(
@@ -195,18 +208,6 @@ class ItemDetailScreen extends ConsumerWidget {
                                 height: 1.25,
                                 color: p.text)),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        ShareFormatter.priceLabel(
-                            listingType: item.listingType, price: item.price),
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: p.primary),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Kondisi: ${item.condition}',
-                          style: TextStyle(fontSize: 13, color: p.textMuted)),
                       const SizedBox(height: 20),
                       Semantics(
                         header: true,
@@ -222,14 +223,24 @@ class ItemDetailScreen extends ConsumerWidget {
                               fontSize: 14.5,
                               height: 1.55,
                               color: p.textMuted)),
+                      if (showProgressTimeline) ...[
+                        const SizedBox(height: 22),
+                        TransactionProgressTimeline(
+                          steps: buildTransactionStepsWithDates(
+                            itemStatus: item.status,
+                            request: activeRequest,
+                            isOwner: isOwner,
+                            itemCreatedAt: cloudModel?.createdAt,
+                            completedAt: cloudModel?.updatedAt,
+                          ),
+                        ),
+                      ],
                       if (isCloudItem) ...[
                         const SizedBox(height: 22),
                         _PickupLocationSection(
                           itemId: item.id,
                           areaLabel: item.address,
                           isOwner: canDeleteCloudItem,
-                          currentLatitude: profile?.latitude,
-                          currentLongitude: profile?.longitude,
                         ),
                       ],
                       const SizedBox(height: 22),
@@ -296,15 +307,18 @@ class ItemDetailScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      // Chat hanya untuk calon penerima, bukan pemilik barang.
+                      // Chat untuk calon penerima, atau pemilik dengan peminta yang diterima.
                       if (!isOwner) ...[
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           height: 50,
                           child: OutlinedButton.icon(
-                            onPressed: () => context
-                                .push(AppRoutes.chat(item.id, item.ownerName)),
+                            onPressed: () => context.push(AppRoutes.chat(
+                              item.id,
+                              item.ownerName,
+                              requesterId: firebaseUid,
+                            )),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: p.primary,
                               side: BorderSide(color: p.primary),
@@ -316,6 +330,34 @@ class ItemDetailScreen extends ConsumerWidget {
                             label: const Text('Chat Pemberi',
                                 style: TextStyle(
                                     fontSize: 15, fontWeight: FontWeight.w800)),
+                          ),
+                        ),
+                      ] else if (acceptedRequest != null) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            onPressed: () => context.push(AppRoutes.chat(
+                              item.id,
+                              acceptedRequest!.requesterName,
+                              requesterId: acceptedRequest.requesterId,
+                            )),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: p.primary,
+                              side: BorderSide(color: p.primary),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            icon:
+                                const Icon(Icons.chat_bubble_outline, size: 19),
+                            label: Text(
+                              'Chat ${acceptedRequest.requesterName}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w800),
+                            ),
                           ),
                         ),
                       ],
@@ -341,7 +383,8 @@ class ItemDetailScreen extends ConsumerWidget {
                         width: double.infinity,
                         height: 54,
                         child: ElevatedButton.icon(
-                          onPressed: () => _confirmComplete(context, ref, item),
+                          onPressed: () => _confirmComplete(
+                              context, ref, item, acceptedRequest),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: p.primary,
                             foregroundColor: p.onPrimary,
@@ -395,7 +438,10 @@ class ItemDetailScreen extends ConsumerWidget {
 
   /// Menandai serah terima selesai (reserved -> completed), satu arah.
   Future<void> _confirmComplete(
-      BuildContext context, WidgetRef ref, Item item) async {
+      BuildContext context,
+      WidgetRef ref,
+      Item item,
+      CloudPickupRequest? acceptedRequest) async {
     final p = context.palette;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -427,6 +473,9 @@ class ItemDetailScreen extends ConsumerWidget {
                   item.id,
                   ItemStatusRules.completed,
                   from: ItemStatusRules.reserved,
+                  acceptedRequesterId: acceptedRequest?.requesterId,
+                  itemTitle: item.title,
+                  ownerName: item.ownerName,
                 )),
       );
       messenger.result(outcome,
@@ -497,30 +546,6 @@ class ItemDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _shareOnWhatsApp(BuildContext context, Item item) async {
-    final messenger = AppMessenger.of(context);
-    final text = ShareFormatter.formatItemSummary(
-      title: item.title,
-      category: item.category,
-      condition: item.condition,
-      listingType: item.listingType,
-      price: item.price,
-      area: item.address,
-      description: item.description,
-    );
-    final uri = Uri.https('wa.me', '/', {'text': text});
-    try {
-      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!opened && context.mounted) {
-        messenger.error('WhatsApp tidak dapat dibuka di perangkat ini.');
-      }
-    } catch (_) {
-      if (context.mounted) {
-        messenger.error('WhatsApp tidak dapat dibuka di perangkat ini.');
-      }
-    }
-  }
-
   /// Tombol utama calon penerima. Teksnya mencerminkan status pengajuan
   /// sehingga pengguna tahu langkah berikutnya tanpa menebak.
   Widget _requestButton(
@@ -582,9 +607,8 @@ class ItemDetailScreen extends ConsumerWidget {
     // Diambil sebelum await: SnackBar tetap tampil walaupun sheet sudah
     // ditutup pengguna saat proses berjalan.
     final messenger = AppMessenger.of(context);
-    final reasonController = TextEditingController();
 
-    showModalBottomSheet<void>(
+    showModalBottomSheet(
       context: context,
       backgroundColor: p.surface,
       // Sheet boleh lebih tinggi dan bisa di-scroll bila font diperbesar.
@@ -603,11 +627,9 @@ class ItemDetailScreen extends ConsumerWidget {
                     ref.read(firebaseRepositoryProvider).createPickupRequest(
                           itemId: item.id,
                           method: methods[selected],
-                          reason: reasonController.text,
                         ),
                     timeout: const Duration(seconds: 12),
                   );
-                  ref.invalidate(myCloudRequestForItemProvider(item.id));
                   messenger.result(outcome,
                       done: 'Pengajuan terkirim via "${methods[selected]}" 🎉 '
                           'Tunggu persetujuan pemberi.',
@@ -621,9 +643,7 @@ class ItemDetailScreen extends ConsumerWidget {
                           requesterId: user.id,
                           requesterName: user.name,
                           method: methods[selected],
-                          message: reasonController.text.trim().isEmpty
-                              ? 'Halo, saya berminat dengan barang ini.'
-                              : reasonController.text.trim(),
+                          message: 'Halo, saya berminat dengan barang ini.',
                         );
                   }
                   messenger.success(
@@ -712,25 +732,6 @@ class ItemDetailScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
-                    const SizedBox(height: 4),
-                    Text('Alasan singkat (opsional)',
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: p.text)),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: reasonController,
-                      enabled: !sending,
-                      maxLength: 240,
-                      maxLines: 3,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        hintText:
-                            'Ceritakan singkat kenapa kamu membutuhkan barang ini',
-                        alignLabelWithHint: true,
-                      ),
-                    ),
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
@@ -780,7 +781,7 @@ class ItemDetailScreen extends ConsumerWidget {
           },
         );
       },
-    ).whenComplete(reasonController.dispose);
+    );
   }
 }
 
@@ -873,15 +874,11 @@ class _PickupLocationSection extends ConsumerWidget {
     required this.itemId,
     required this.areaLabel,
     required this.isOwner,
-    required this.currentLatitude,
-    required this.currentLongitude,
   });
 
   final String itemId;
   final String areaLabel;
   final bool isOwner;
-  final double? currentLatitude;
-  final double? currentLongitude;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -913,8 +910,6 @@ class _PickupLocationSection extends ConsumerWidget {
     // Titik GPS hanya tersedia bagi pemilik dan peminta yang disetujui.
     final lat = fullAddress?.latitude;
     final lng = fullAddress?.longitude;
-    final profileLat = currentLatitude;
-    final profileLng = currentLongitude;
     final hasPin = lat != null && lng != null;
     final fullText = fullAddress?.address.trim() ?? '';
     final mapsQuery = fullText;
@@ -968,13 +963,6 @@ class _PickupLocationSection extends ConsumerWidget {
             ],
           ),
           if (hasPin) ...[
-            if (profileLat != null && profileLng != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Sekitar ${DistanceHelper.formatKilometers(DistanceHelper.kilometers(startLatitude: profileLat, startLongitude: profileLng, endLatitude: lat, endLongitude: lng))} dari lokasi profilmu',
-                style: TextStyle(fontSize: 12.5, color: p.textMuted),
-              ),
-            ],
             const SizedBox(height: 10),
             PinPreviewMap(
               latitude: lat,
@@ -1003,7 +991,8 @@ class _PickupLocationSection extends ConsumerWidget {
                 icon: const Icon(Icons.map_outlined, size: 19),
                 label: const Text(
                   'Buka Titik di Google Maps',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
                 ),
               ),
             ),

@@ -55,12 +55,26 @@ final myCloudItemsStreamProvider = StreamProvider<List<ItemModel>>((ref) {
 /// Detail satu barang berdasarkan Firestore document ID.
 /// Memakai autoDispose dan memantau auth state agar pergantian akun
 /// tidak menyisakan cache error `permission-denied`.
+///
+/// Alur:
+///  1. Pastikan Firebase punya sesi aktif (anonim atau login biasa)
+///     sebelum membuka stream — tanpa ini Firestore rules menolak.
+///  2. ref.watch(firebaseAuthStateProvider) membuat provider ini
+///     otomatis rebuild setiap kali akun berganti (logout/login),
+///     sehingga cache error lama ikut dibuang oleh autoDispose.
 final cloudItemByIdProvider =
     StreamProvider.autoDispose.family<ItemModel?, String>((ref, id) async* {
+  // Selalu pastikan ada sesi Firebase sebelum buka stream.
+  // ensureSignedIn() idempotent — tidak membuat sesi baru bila sudah ada.
+  await ref.read(firebaseAuthServiceProvider).ensureSignedIn();
+
+  // Watch auth state agar provider rebuild otomatis saat akun berganti.
   final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
   if (firebaseUser == null) {
-    await ref.watch(firebaseAuthServiceProvider).ensureSignedIn();
+    // Auth belum siap setelah ensureSignedIn — emit loading, tunggu rebuild.
+    return;
   }
+
   yield* ref.watch(firebaseRepositoryProvider).getItemById(id);
 });
 
@@ -71,6 +85,25 @@ final myOutgoingCloudRequestItemIdsProvider =
   if (firebaseUser == null) return Stream.value(const []);
   final repository = ref.watch(firebaseRepositoryProvider);
   return repository.getMyOutgoingRequestItemIds(firebaseUser.uid);
+});
+
+/// Seluruh pengajuan yang pernah dibuat user aktif (pending, diterima, ditolak)
+/// untuk menampilkan progress transaksi dan riwayat di halaman Aktivitas.
+final myOutgoingCloudRequestsProvider =
+    StreamProvider<List<CloudPickupRequest>>((ref) {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) return Stream.value(const []);
+  final repository = ref.watch(firebaseRepositoryProvider);
+  return repository.getMyOutgoingRequests(firebaseUser.uid);
+});
+
+/// Seluruh pengajuan masuk untuk barang milik user aktif (POV pemberi).
+final myIncomingCloudRequestsProvider =
+    StreamProvider<List<CloudPickupRequest>>((ref) {
+  final firebaseUser = ref.watch(firebaseAuthStateProvider).valueOrNull;
+  if (firebaseUser == null) return Stream.value(const []);
+  final repository = ref.watch(firebaseRepositoryProvider);
+  return repository.getRequestsForOwner(firebaseUser.uid);
 });
 
 /// Profil akun yang tersimpan di Firestore untuk Firebase UID aktif.

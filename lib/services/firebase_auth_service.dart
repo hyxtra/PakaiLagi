@@ -134,3 +134,8 @@ final firebaseAuthStateProvider = StreamProvider<User?>((ref) {
   final authService = ref.watch(firebaseAuthServiceProvider);
   return authService.authStateChanges;
 });
+
+/// UID akun Firebase aktif saat ini (null bila belum login).
+final currentFirebaseUidProvider = Provider<String?>((ref) {
+  return ref.watch(firebaseAuthStateProvider).valueOrNull?.uid;
+});

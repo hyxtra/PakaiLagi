@@ -1,9 +1,11 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'firebase_options.dart';
+import 'providers/theme_provider.dart';
 import 'services/firestore_configuration.dart';
 
 Future<void> main() async {
@@ -12,5 +14,18 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
   await FirestoreConfiguration.configure();
-  runApp(const ProviderScope(child: PakaiLagiApp()));
+
+  // SharedPreferences dimuat sekali di sini lalu dioper ke ProviderScope
+  // sebagai override agar ThemeModeNotifier bisa membaca preferensi tema
+  // yang tersimpan bahkan sebelum widget pertama dibangun.
+  final prefs = await SharedPreferences.getInstance();
+
+  runApp(
+    ProviderScope(
+      overrides: [
+        sharedPrefsProvider.overrideWithValue(prefs),
+      ],
+      child: const PakaiLagiApp(),
+    ),
+  );
 }

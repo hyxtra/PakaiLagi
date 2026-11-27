@@ -34,6 +34,7 @@ class ItemModel {
     this.ownerName = 'Pengguna',
     this.status = 'available',
     this.createdAt,
+    this.updatedAt,
   });
 
   final String id;
@@ -57,6 +58,7 @@ class ItemModel {
   final String ownerName;
   final String status;
   final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   /// Metode yang boleh dipilih peminta. Barang lama (tanpa data metode)
   /// menawarkan semua metode, seperti perilaku sebelum metode disimpan.
@@ -79,6 +81,7 @@ class ItemModel {
   /// Field privat lama (`address`, `latitude`, `longitude`) sengaja diabaikan.
   factory ItemModel.fromMap(Map<String, dynamic> data, {required String id}) {
     final rawCreatedAt = data['createdAt'];
+    final rawUpdatedAt = data['updatedAt'];
     return ItemModel(
       id: id,
       title: data['title'] as String? ?? '',
@@ -99,6 +102,11 @@ class ItemModel {
           ? rawCreatedAt.toDate()
           : rawCreatedAt is DateTime
               ? rawCreatedAt
+              : null,
+      updatedAt: rawUpdatedAt is Timestamp
+          ? rawUpdatedAt.toDate()
+          : rawUpdatedAt is DateTime
+              ? rawUpdatedAt
               : null,
     );
   }

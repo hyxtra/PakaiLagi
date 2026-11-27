@@ -140,14 +140,25 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   // Brand
                   ExcludeSemantics(
                     child: Container(
-                      width: 72,
-                      height: 72,
+                      width: 84,
+                      height: 84,
                       decoration: BoxDecoration(
-                        color: p.primary,
                         borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: p.primary.withValues(alpha: 0.16),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                      alignment: Alignment.center,
-                      child: const Text('♻️', style: TextStyle(fontSize: 36)),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(22),
+                        child: Image.asset(
+                          'assets/logo/pakailagi_logo.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
